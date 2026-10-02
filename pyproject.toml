@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project-template"
+version = "0.1.0"
+description = "Reusable Makefile-first Python project template."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Project Author" }]
+dependencies = []
+
+# Deliberately NO requires-python.
+# Repository policy: the active Conda environment is the Python authority.
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff>=0.13",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"

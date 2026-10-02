@@ -1,0 +1,11 @@
+{
+  "section": ["bold", "bright_cyan"],
+  "key": ["cyan"],
+  "value": ["bright_white"],
+  "ok": ["bold", "bright_green"],
+  "warning": ["bold", "bright_yellow"],
+  "error": ["bold", "bright_red"],
+  "action": ["bold", "bright_magenta"],
+  "bootstrap": ["yellow"],
+  "muted": ["dim", "white"]
+}
