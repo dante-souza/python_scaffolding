@@ -20,7 +20,8 @@ For agent behavior, this file is authoritative over README prose. `PROJECT.md` d
 ## Mandatory repository rules
 
 - The Makefile is the canonical human-facing command interface.
-- Do not introduce recurring direct commands when a Make target should own that workflow.
+- `project.sh` is the supported Bash adapter and must delegate to the shared Python command implementation rather than reimplementing project logic.
+- Do not introduce recurring direct commands when the stable project command surface should own that workflow.
 - Conda selects the Python interpreter/version.
 - Do not add `.python-version` or `project.requires-python` under the default environment policy.
 - Do not make project automation depend on whichever `uv` happens to appear first on shell `PATH`.

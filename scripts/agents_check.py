@@ -12,6 +12,7 @@ REQUIRED = [
     ROOT / "PROJECT.md",
     ROOT / "README.md",
     ROOT / "Makefile",
+    ROOT / "project.sh",
     AGENTS / "architect.md",
     AGENTS / "developer.md",
     AGENTS / "reviewer.md",

@@ -1,6 +1,6 @@
 # Python Project Base
 
-Reusable repository scaffold for Python projects with a **Makefile-first workflow**, **Conda-owned Python selection**, **Conda-local `uv`**, explicit `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer.
+Reusable repository scaffold for Python projects with a **Makefile-first workflow**, a **Bash command adapter**, **Conda-owned Python selection**, **Conda-local `uv`**, explicit `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer.
 
 The template is intentionally opinionated about **workflow**, not about the Python version: there is no `.python-version` and no `requires-python` declaration. The active Conda environment is the authority.
 
@@ -22,8 +22,9 @@ Conda environment
   └── records source interpreter provenance
           │
           ▼
- Makefile
-  └── is the canonical human-facing command interface
+ Python command dispatcher
+  ├── Makefile      ← canonical human-facing interface
+  └── project.sh    ← Bash adapter
 ```
 
 A shell-global `uv` may exist and may even win normal `PATH` resolution. That is observable, but project targets deliberately avoid depending on it.
@@ -45,12 +46,25 @@ make lint
 make check
 ```
 
-Use `make help` for the complete target list.
+From Bash, the equivalent adapter is available:
+
+```bash
+./project.sh doctor
+./project.sh setup
+./project.sh test
+./project.sh lint
+./project.sh check
+```
+
+This includes Linux/macOS Bash, WSL, and Git Bash/MSYS2 on Windows when their normal Conda activation is available. The Bash adapter delegates to the same Python command dispatcher as Make, so it does not maintain a second implementation of project behavior.
+
+Use `make help` or `./project.sh help` for the complete command list.
 
 ## Environment observability
 
 `make doctor` reports:
 
+- host platform, shell environment, Bash availability/version, GNU Make availability/version, and the Bash adapter path;
 - active Python and version;
 - Conda activation/prefix and whether Python is actually inside it;
 - the `uv` selected by shell `PATH`;
@@ -84,6 +98,7 @@ make doctor-force-color
 ├── PROJECT.md
 ├── README.md
 ├── Makefile
+├── project.sh
 ├── pyproject.toml
 ├── config/
 │   ├── console-colors.json
@@ -116,9 +131,11 @@ make doctor-force-color
 └── .claude/
 ```
 
-## Makefile policy
+## Command interface policy
 
-For humans and coding agents, recurring repository operations belong behind `make` targets. Direct tool commands are implementation details unless debugging a target itself.
+The Makefile is the canonical human-facing interface. `project.sh` is a supported Bash adapter exposing the same command names for environments where a shell-native entry point is useful. Both are intentionally thin and delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code.
+
+For humans and coding agents, recurring repository operations belong behind the stable project command surface. Direct tool commands are implementation details unless debugging the command layer itself.
 
 Important targets:
 
@@ -135,6 +152,8 @@ Important targets:
 | `make format` | Format/fix supported files. |
 | `make check` | Run quality gates plus agent/skill validation. |
 | `make agents-check` | Validate AI policy scaffold. |
+
+Every target above can also be called from Bash as `./project.sh <command>`, for example `./project.sh doctor` or `./project.sh env-rebuild`.
 
 ## Python source vs notebooks
 

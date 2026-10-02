@@ -1,13 +1,10 @@
 # Canonical human-facing command interface for this repository.
 # Conda chooses Python. uv is managed inside the active Conda environment.
+# Recipes stay shell-light so the same Makefile works from Bash/POSIX shells
+# as well as Windows shells supported by GNU Make.
 
 PYTHON ?= python
-
-ifeq ($(OS),Windows_NT)
-VENV_PYTHON := .venv/Scripts/python.exe
-else
-VENV_PYTHON := .venv/bin/python
-endif
+PROJECT_CLI := $(PYTHON) scripts/repo.py
 
 .PHONY: help doctor doctor-no-color doctor-force-color bootstrap setup sync lock \
         env-rebuild test lint format check clean run agents-list skills-list agents-check
@@ -15,57 +12,55 @@ endif
 .DEFAULT_GOAL := help
 
 help:
-	@$(PYTHON) scripts/repo.py help
+	@$(PROJECT_CLI) help
 
 doctor:
-	@$(PYTHON) scripts/doctor.py
+	@$(PROJECT_CLI) doctor
 
 doctor-no-color:
-	@$(PYTHON) scripts/doctor.py --no-color
+	@$(PROJECT_CLI) doctor-no-color
 
 doctor-force-color:
-	@$(PYTHON) scripts/doctor.py --force-color
+	@$(PROJECT_CLI) doctor-force-color
 
 bootstrap:
-	@$(PYTHON) scripts/bootstrap.py
+	@$(PROJECT_CLI) bootstrap
 
 sync:
-	@$(PYTHON) scripts/repo.py sync
+	@$(PROJECT_CLI) sync
 
 lock:
-	@$(PYTHON) scripts/repo.py lock
+	@$(PROJECT_CLI) lock
 
-setup: bootstrap sync doctor
+setup:
+	@$(PROJECT_CLI) setup
 
 env-rebuild:
-	@$(PYTHON) scripts/repo.py env-rebuild
-	@$(MAKE) bootstrap
-	@$(MAKE) sync
-	@$(MAKE) doctor
+	@$(PROJECT_CLI) env-rebuild
 
 test:
-	@$(PYTHON) scripts/repo.py test
+	@$(PROJECT_CLI) test
 
 lint:
-	@$(PYTHON) scripts/repo.py lint
+	@$(PROJECT_CLI) lint
 
 format:
-	@$(PYTHON) scripts/repo.py format
+	@$(PROJECT_CLI) format
 
 check:
-	@$(PYTHON) scripts/repo.py check
+	@$(PROJECT_CLI) check
 
 run:
-	@$(PYTHON) scripts/repo.py run
+	@$(PROJECT_CLI) run
 
 clean:
-	@$(PYTHON) scripts/repo.py clean
+	@$(PROJECT_CLI) clean
 
 agents-list:
-	@$(PYTHON) scripts/agents_check.py --list-agents
+	@$(PROJECT_CLI) agents-list
 
 skills-list:
-	@$(PYTHON) scripts/agents_check.py --list-skills
+	@$(PROJECT_CLI) skills-list
 
 agents-check:
-	@$(PYTHON) scripts/agents_check.py --check
+	@$(PROJECT_CLI) agents-check

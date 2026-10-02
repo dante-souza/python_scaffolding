@@ -4,6 +4,7 @@ import argparse
 import importlib.metadata
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -102,6 +103,31 @@ def main() -> int:
     group.add_argument("--force-color", action="store_true")
     args = parser.parse_args()
     colors = color_enabled(force=args.force_color, disable=args.no_color)
+
+    shell_env = os.environ.get("SHELL")
+    bash_raw = shutil.which("bash")
+    bash_path = Path(bash_raw) if bash_raw else None
+    bash_version_raw = capture([str(bash_path), "--version"]) if bash_path else None
+    bash_version = bash_version_raw.splitlines()[0] if bash_version_raw else "<not available>"
+    make_raw = shutil.which("make")
+    make_path = Path(make_raw) if make_raw else None
+    make_version_raw = capture([str(make_path), "--version"]) if make_path else None
+    make_version = make_version_raw.splitlines()[0] if make_version_raw else "<not available>"
+    bash_adapter = ROOT / "project.sh"
+
+    section("Shell / Platform", enabled=colors)
+    kv("platform_system", platform.system(), enabled=colors)
+    kv("platform_release", platform.release(), enabled=colors)
+    kv("os_name", os.name, enabled=colors)
+    kv("shell_env", shell_env or "<not set>", enabled=colors)
+    kv("msystem", os.environ.get("MSYSTEM", "<not set>"), enabled=colors)
+    kv("bash_available", bool(bash_path), enabled=colors)
+    kv("bash_path", bash_path or "<not found>", enabled=colors)
+    kv("bash_version", bash_version, enabled=colors)
+    kv("bash_adapter", bash_adapter, enabled=colors)
+    kv("bash_adapter_exists", bash_adapter.is_file(), enabled=colors)
+    kv("make_path", make_path or "<not found>", enabled=colors)
+    kv("make_version", make_version, enabled=colors)
 
     conda_prefix = os.environ.get("CONDA_PREFIX")
     conda_active = bool(conda_prefix)
@@ -244,6 +270,11 @@ def main() -> int:
             "pyproject.toml declares requires-python; this template delegates "
             "Python selection to Conda"
         )
+
+    if not bash_adapter.is_file():
+        errors.append("Bash adapter project.sh is missing")
+    elif not IS_WINDOWS and not os.access(bash_adapter, os.X_OK):
+        warnings.append("project.sh exists but is not executable; run: chmod +x project.sh")
 
     if conda_active and not conda_uv_exists:
         bootstrap.append("Conda-local uv is not installed yet")

@@ -5,7 +5,7 @@
 **Working name:** Python Project Base  
 **Type:** reusable repository scaffold  
 **Primary language:** Python  
-**Developer interface:** Makefile
+**Developer interface:** Makefile (canonical) + Bash adapter (`project.sh`)
 
 ## Objective
 
@@ -17,7 +17,7 @@ Provide a dependable starting point for Python repositories that makes environme
 2. **No repository Python pin.** Do not add `.python-version` or `project.requires-python` unless the project deliberately changes this policy.
 3. **`uv` is project-controlled.** Bootstrap installs/updates `uv` in the active Conda environment and project automation calls it via `python -m uv`.
 4. **`.venv` is reproducible and attributable.** Its source interpreter, Python version and Conda prefix are recorded in `.venv/.project-source-python.json`.
-5. **Makefile is the sole routine entry point.** Repeated developer actions should be represented as Make targets.
+5. **Makefile is the canonical routine entry point.** Repeated developer actions should be represented as Make targets; `project.sh` mirrors that command surface for Bash users and delegates to the same Python dispatcher.
 6. **Observability precedes repair.** `make doctor` explains current state, policy violations, warnings and the next corrective action.
 7. **Exploration and production logic are separated.** Notebooks are for exploration; reusable/reproducible logic belongs in Python modules/scripts.
 8. **AI guidance has a single canonical source.** Shared agent and skill definitions live under `ai/`; tool-specific directories adapt rather than fork them.
@@ -31,6 +31,7 @@ Included in the base scaffold:
 - tests;
 - notebooks and staged data directories;
 - Makefile lifecycle;
+- Bash adapter with the same command vocabulary;
 - Conda + `uv` bootstrap;
 - colorful environment doctor;
 - `.venv` provenance tracking;
@@ -54,7 +55,8 @@ A healthy project satisfies all of the following:
 - Conda-local `uv` is installed;
 - `.venv` exists and was created from the active Conda Python;
 - `.venv` provenance metadata matches the active Conda interpreter;
-- project workflows use `python -m uv`, not an arbitrary global `uv` executable.
+- project workflows use `python -m uv`, not an arbitrary global `uv` executable;
+- Bash support remains a thin adapter and does not fork bootstrap/diagnostic logic.
 
 An external `uv` on `PATH` is allowed and reported as a warning when it wins shell resolution.
 
@@ -76,4 +78,4 @@ make check
 
 ## Evolution rule
 
-When a manual command becomes part of normal project operation, add or update a Make target and document it. When a reusable AI behavior becomes stable, promote it into a focused skill rather than expanding global agent policy indefinitely.
+When a manual command becomes part of normal project operation, add or update the canonical command in `scripts/repo.py`, expose it through Make, and keep the Bash adapter compatible without duplicating implementation logic. When a reusable AI behavior becomes stable, promote it into a focused skill rather than expanding global agent policy indefinitely.
