@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -28,7 +29,8 @@ from environment import (  # noqa: E402
 def test_repository_environment_policy_loads() -> None:
     policy = load_policy()
 
-    assert policy.authority == "conda"
+    expected_authority = os.environ.get("SCAFFOLDING_EXPECT_AUTHORITY", "uv")
+    assert policy.authority == expected_authority
     assert policy.python_request == "3.12"
     assert policy.venv_name == ".venv"
     assert policy.provenance_file == ".project-source-python.json"

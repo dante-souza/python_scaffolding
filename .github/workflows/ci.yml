@@ -21,8 +21,18 @@ concurrency:
 
 jobs:
   linux:
-    name: Linux / Conda / Make
+    name: Linux / ${{ matrix.label }} / Make
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - authority: conda
+            label: Conda
+          - authority: uv
+            label: uv
+    env:
+      SCAFFOLDING_EXPECT_AUTHORITY: ${{ matrix.authority }}
     defaults:
       run:
         shell: bash -el {0}
@@ -34,17 +44,40 @@ jobs:
           persist-credentials: false
 
       - name: Activate Conda authority
+        if: matrix.authority == 'conda'
         uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
         with:
           activate-environment: python-scaffolding-ci
           python-version: "3.12"
           auto-update-conda: false
 
+      - name: Install native uv authority
+        if: matrix.authority == 'uv'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Select Conda policy for this lane
+        if: matrix.authority == 'conda'
+        run: >-
+          python -c "from pathlib import Path; p=Path('environment.toml');
+          s=p.read_text(encoding='utf-8');
+          old='authority = '+chr(34)+'uv'+chr(34);
+          new='authority = '+chr(34)+'conda'+chr(34);
+          assert old in s;
+          p.write_text(s.replace(old,new,1),encoding='utf-8')"
+
       - name: Environment baseline
         run: |
           python --version
-          conda info --envs
           make --version
+          python -c "from pathlib import Path; print(next(line for line in Path('environment.toml').read_text(encoding='utf-8').splitlines() if line.startswith('authority = ')))"
+
+      - name: Conda baseline
+        if: matrix.authority == 'conda'
+        run: conda info --envs
+
+      - name: uv baseline
+        if: matrix.authority == 'uv'
+        run: uv --version
 
       - name: Bootstrap scaffold
         run: make setup
@@ -53,8 +86,18 @@ jobs:
         run: make check
 
   windows:
-    name: Windows / Conda / Make
+    name: Windows / ${{ matrix.label }} / Make
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - authority: conda
+            label: Conda
+          - authority: uv
+            label: uv
+    env:
+      SCAFFOLDING_EXPECT_AUTHORITY: ${{ matrix.authority }}
     defaults:
       run:
         shell: pwsh
@@ -66,20 +109,43 @@ jobs:
           persist-credentials: false
 
       - name: Activate Conda authority
+        if: matrix.authority == 'conda'
         uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
         with:
           activate-environment: python-scaffolding-ci
           python-version: "3.12"
           auto-update-conda: false
 
+      - name: Install native uv authority
+        if: matrix.authority == 'uv'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
       - name: Install GNU Make
         run: choco install make --yes --no-progress
+
+      - name: Select Conda policy for this lane
+        if: matrix.authority == 'conda'
+        run: >-
+          python -c "from pathlib import Path; p=Path('environment.toml');
+          s=p.read_text(encoding='utf-8');
+          old='authority = '+chr(34)+'uv'+chr(34);
+          new='authority = '+chr(34)+'conda'+chr(34);
+          assert old in s;
+          p.write_text(s.replace(old,new,1),encoding='utf-8')"
 
       - name: Environment baseline
         run: |
           python --version
-          conda info --envs
           make --version
+          python -c "from pathlib import Path; print(next(line for line in Path('environment.toml').read_text(encoding='utf-8').splitlines() if line.startswith('authority = ')))"
+
+      - name: Conda baseline
+        if: matrix.authority == 'conda'
+        run: conda info --envs
+
+      - name: uv baseline
+        if: matrix.authority == 'uv'
+        run: uv --version
 
       - name: Bootstrap scaffold
         run: make setup

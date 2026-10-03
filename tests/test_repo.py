@@ -13,6 +13,16 @@ import repo as repo_module  # noqa: E402
 from environment import EnvironmentPolicy  # noqa: E402
 
 
+def conda_policy() -> EnvironmentPolicy:
+    return EnvironmentPolicy(
+        authority="conda",
+        venv_name=".venv",
+        provenance_file=".project-source-python.json",
+        uv_invocation="python-module",
+        python_request="3.12",
+    )
+
+
 def uv_policy() -> EnvironmentPolicy:
     return EnvironmentPolicy(
         authority="uv",
@@ -26,6 +36,7 @@ def uv_policy() -> EnvironmentPolicy:
 def test_handoff_to_authority_skips_subprocess_without_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(repo_module, "POLICY", conda_policy())
     monkeypatch.setattr(
         repo_module,
         "authority_handoff_target",
@@ -48,6 +59,7 @@ def test_handoff_to_authority_preserves_command_and_exit_code(
     target.touch()
     calls: list[tuple[list[str], Path, bool]] = []
 
+    monkeypatch.setattr(repo_module, "POLICY", conda_policy())
     monkeypatch.setattr(
         repo_module,
         "authority_handoff_target",
