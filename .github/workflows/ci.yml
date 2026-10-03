@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux / Conda / Make
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Activate Conda authority
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
+        with:
+          activate-environment: python-scaffolding-ci
+          python-version: "3.12"
+          auto-update-conda: false
+
+      - name: Environment baseline
+        run: |
+          python --version
+          conda info --envs
+          make --version
+
+      - name: Bootstrap scaffold
+        run: make setup
+
+      - name: Quality gates
+        run: make check
+
+  windows:
+    name: Windows / Conda / Make
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Activate Conda authority
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
+        with:
+          activate-environment: python-scaffolding-ci
+          python-version: "3.12"
+          auto-update-conda: false
+
+      - name: Install GNU Make
+        run: choco install make --yes --no-progress
+
+      - name: Environment baseline
+        run: |
+          python --version
+          conda info --envs
+          make --version
+
+      - name: Bootstrap scaffold
+        run: make setup
+
+      - name: Quality gates
+        run: make check
