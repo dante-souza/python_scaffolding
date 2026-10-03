@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = ROOT / "config" / "environment.toml"
+CONFIG_PATH = ROOT / "environment.toml"
 IS_WINDOWS = os.name == "nt"
 
 
