@@ -84,11 +84,16 @@ def require_venv_provenance() -> None:
 
 
 def cmd_help() -> None:
-    print("Project commands (Makefile is canonical; ./project.sh is the Bash adapter):\n")
+    print(
+        "Project commands "
+        "(Makefile is canonical; project.sh and project.ps1 are shell adapters):\n"
+    )
     width = max(map(len, TARGETS))
     for name, description in TARGETS.items():
         print(f"  make {name:<{width}}  {description}")
-    print("\nBash equivalent: ./project.sh <command>")
+    print("\nShell adapters:")
+    print("  Bash:       ./project.sh <command>")
+    print(r"  PowerShell: .\project.ps1 <command>")
 
 
 def cmd_doctor() -> None:
