@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from environment import (
@@ -11,8 +12,11 @@ from environment import (
     authority_handoff_target,
     load_policy,
     provenance_matches,
+    python_executable_version,
     read_provenance,
     require_active_authority,
+    require_native_uv,
+    resolve_uv_managed_python,
     uv_module_args,
 )
 
@@ -25,11 +29,11 @@ TARGETS = {
     "doctor": f"Inspect shell/Python/{AUTHORITY}/uv/.venv state and repository policy.",
     "doctor-no-color": "Run environment diagnostics without ANSI colors.",
     "doctor-force-color": "Force ANSI colors in environment diagnostics.",
-    "bootstrap": f"Install/update uv inside active {AUTHORITY} and create .venv from its Python.",
-    "sync": "Synchronize project dependencies into .venv using authority-local uv.",
+    "bootstrap": f"Prepare the configured {AUTHORITY} Python authority and project .venv.",
+    "sync": "Synchronize project dependencies into .venv through configured uv authority.",
     "setup": "bootstrap + sync + doctor.",
-    "env-rebuild": f"Delete .venv and recreate it from the active {AUTHORITY} Python.",
-    "lock": f"Refresh uv.lock under the active {AUTHORITY} Python policy.",
+    "env-rebuild": f"Delete .venv and recreate it from configured {AUTHORITY} authority.",
+    "lock": f"Refresh uv.lock under configured {AUTHORITY} Python policy.",
     "test": "Run pytest.",
     "lint": "Run Ruff checks.",
     "format": "Format source/tests/scripts with Ruff.",
@@ -40,6 +44,14 @@ TARGETS = {
     "agents-check": "Validate agent/skill scaffold and required policy files.",
     "clean": "Remove generated caches/build artifacts (not .venv).",
 }
+
+
+@dataclass(frozen=True)
+class AuthorityRuntime:
+    python: Path
+    python_version: str
+    prefix: Path | None = None
+    uv_executable: Path | None = None
 
 
 def run(args: list[str], *, executable: Path | None = None) -> None:
@@ -54,6 +66,12 @@ def run_script(name: str, *args: str) -> None:
 
 
 def handoff_to_authority() -> int | None:
+    # Conda authority is active shell state, so policy-sensitive commands must
+    # execute under that environment's interpreter. Native uv authority is
+    # explicit instead: consumers resolve and pass its managed Python directly.
+    if POLICY.authority == "uv":
+        return None
+
     target = authority_handoff_target(POLICY)
     if target is None:
         return None
@@ -66,11 +84,39 @@ def handoff_to_authority() -> int | None:
     return completed.returncode
 
 
-def require_authority() -> Path:
+def require_authority() -> AuthorityRuntime:
     try:
-        return require_active_authority(POLICY)
+        if POLICY.authority == "conda":
+            prefix = require_active_authority(POLICY)
+            return AuthorityRuntime(
+                python=Path(sys.executable),
+                python_version=sys.version.split()[0],
+                prefix=prefix,
+            )
+
+        uv = require_native_uv(POLICY)
+        python = resolve_uv_managed_python(POLICY, uv_executable=uv)
+        return AuthorityRuntime(
+            python=python,
+            python_version=python_executable_version(python),
+            uv_executable=uv,
+        )
     except EnvironmentContractError as exc:
         raise SystemExit(f"ERROR: {exc}.") from None
+
+
+def run_uv(runtime: AuthorityRuntime, *args: str) -> None:
+    if POLICY.authority == "conda":
+        run(
+            uv_module_args(POLICY, *args),
+            executable=runtime.python,
+        )
+        return
+
+    if runtime.uv_executable is None:
+        raise SystemExit("ERROR: native uv authority has no resolved uv executable.")
+
+    run(list(args), executable=runtime.uv_executable)
 
 
 def require_venv() -> None:
@@ -81,8 +127,8 @@ def require_venv() -> None:
         )
 
 
-def require_venv_provenance() -> None:
-    authority_prefix = require_authority()
+def require_venv_provenance() -> AuthorityRuntime:
+    runtime = require_authority()
     require_venv()
     metadata = read_provenance(POLICY)
     if not metadata:
@@ -92,12 +138,15 @@ def require_venv_provenance() -> None:
     if not provenance_matches(
         POLICY,
         metadata,
-        authority_prefix=authority_prefix,
+        python_executable=runtime.python,
+        python_version=runtime.python_version,
+        authority_prefix=runtime.prefix,
     ):
         raise SystemExit(
             "ERROR: project .venv provenance does not match "
-            f"the active {AUTHORITY} Python. Run: make env-rebuild"
+            f"the configured {AUTHORITY} Python authority. Run: make env-rebuild"
         )
+    return runtime
 
 
 def cmd_help() -> None:
@@ -130,19 +179,13 @@ def cmd_bootstrap() -> None:
 
 
 def cmd_sync() -> None:
-    require_venv_provenance()
-    run(
-        uv_module_args(POLICY, "sync", "--python", str(VENV_PYTHON)),
-        executable=Path(sys.executable),
-    )
+    runtime = require_venv_provenance()
+    run_uv(runtime, "sync", "--python", str(VENV_PYTHON))
 
 
 def cmd_lock() -> None:
-    require_authority()
-    run(
-        uv_module_args(POLICY, "lock", "--python", sys.executable),
-        executable=Path(sys.executable),
-    )
+    runtime = require_authority()
+    run_uv(runtime, "lock", "--python", str(runtime.python))
 
 
 def cmd_setup() -> None:
@@ -152,7 +195,14 @@ def cmd_setup() -> None:
 
 
 def cmd_env_rebuild() -> None:
-    require_authority()
+    if POLICY.authority == "conda":
+        require_authority()
+    else:
+        try:
+            require_native_uv(POLICY)
+        except EnvironmentContractError as exc:
+            raise SystemExit(f"ERROR: {exc}.") from None
+
     if VENV.exists():
         print(f"Removing {VENV}")
         shutil.rmtree(VENV)
