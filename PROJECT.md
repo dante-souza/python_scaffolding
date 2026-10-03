@@ -32,7 +32,7 @@ Included in the base scaffold:
 - tests;
 - notebooks and staged data directories;
 - Makefile lifecycle;
-- Bash and PowerShell adapters with the same command vocabulary;
+- Bash and PowerShell adapters with the same command vocabulary and minimal pre-Python startup diagnostics;
 - `environment.toml` environment-policy contract;
 - shared `scripts/environment.py` policy implementation;
 - Conda + `uv` bootstrap for the currently supported authority;
@@ -59,7 +59,8 @@ Under the current `authority = "conda"` policy, a healthy project satisfies all 
 - `.venv` exists and was created from the active Conda Python;
 - `.venv` provenance metadata matches the active Conda interpreter;
 - project workflows use `python -m uv`, not an arbitrary global `uv` executable;
-- Bash and PowerShell support remain thin adapters and do not fork bootstrap/diagnostic logic;
+- Bash and PowerShell support remain thin adapters and do not fork environment-policy or Python-doctor logic;
+- shell adapters distinguish Python-not-found (`127`) from Python-found-but-not-startable (`126`) and report only minimal bootstrap context;
 - if a shell-local `.venv` shadows the authority Python on `PATH`, the shared dispatcher hands execution back to the configured authority interpreter.
 
 An external `uv` on `PATH` is allowed and reported as a warning when it wins shell resolution.

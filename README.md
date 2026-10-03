@@ -73,6 +73,8 @@ From PowerShell:
 
 Both adapters delegate to the same Python command dispatcher as Make, so neither maintains a second implementation of project behavior.
 
+If Python cannot be resolved or started, the shell adapter prints minimal pre-Python diagnostics before stopping. Exit code `127` means Python was not found; `126` means it was found but could not be started. WSL requires a Python executable runnable inside WSL rather than a Windows/Cygwin interpreter inherited through `PATH`.
+
 Use `make help`, `./project.sh help`, or `.\project.ps1 help` for the complete command list.
 
 ## Environment observability
@@ -137,6 +139,7 @@ make doctor-force-color
 │   └── reference/
 ├── docs/
 │   ├── architecture/
+│   │   └── bootstrap-boundary.md
 │   └── adr/
 ├── ai/
 │   ├── agents/
