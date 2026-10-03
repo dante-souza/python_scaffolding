@@ -26,6 +26,7 @@ flowchart TD
     MK[Makefile - canonical] --> CLI
     SH[project.sh - Bash adapter] --> CLI
     PS[project.ps1 - PowerShell adapter] --> CLI
+    CLI -->|handoff when needed| P
 ```
 
 ## Why this model exists
@@ -47,4 +48,4 @@ A machine may have other `uv` installations. They are diagnostic context, not pr
 
 `project.sh` provides a Bash-native entry point for Linux/macOS, WSL, and Git Bash/MSYS2 environments. `project.ps1` provides the corresponding PowerShell-native entry point on Windows and other PowerShell-capable hosts.
 
-Both adapters intentionally perform only shell-safe startup work: repository-root resolution, Python command discovery, default-to-help behavior, and delegation to `scripts/repo.py`. Bootstrap, provenance, dependency, and diagnostic policy remains in Python, so Make, Bash, and PowerShell share the same implementation boundary.
+Both adapters intentionally perform only shell-safe startup work: repository-root resolution, Python command discovery, default-to-help behavior, and delegation to `scripts/repo.py`. The bootstrap interpreter is therefore allowed to be a project `.venv` Python or another compatible interpreter. When the configured authority is active, the shared dispatcher resolves its Python through `scripts/environment.py` and hands execution to that interpreter before policy-sensitive commands continue. Bootstrap, provenance, dependency, and diagnostic policy remains in Python, so Make, Bash, and PowerShell share the same implementation boundary.

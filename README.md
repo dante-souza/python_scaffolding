@@ -151,7 +151,7 @@ make doctor-force-color
 
 ## Command interface policy
 
-The Makefile is the canonical human-facing interface. `project.sh` and `project.ps1` are supported Bash and PowerShell adapters exposing the same command names where a shell-native entry point is useful. All three entry points delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. `environment.toml` declares environment policy, and `scripts/environment.py` is the single implementation layer that interprets it. Commands that execute or mutate the managed project environment verify `.venv` provenance against the configured authority before proceeding.
+The Makefile is the canonical human-facing interface. `project.sh` and `project.ps1` are supported Bash and PowerShell adapters exposing the same command names where a shell-native entry point is useful. All three entry points delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. The dispatcher may be launched by a non-authority interpreter (for example an already-active project `.venv`), but when the configured authority is active it hands command execution to that authority's Python before policy-sensitive work proceeds. `environment.toml` declares environment policy, and `scripts/environment.py` is the single implementation layer that interprets it.
 
 For humans and coding agents, recurring repository operations belong behind the stable project command surface. Direct tool commands are implementation details unless debugging the command layer itself.
 

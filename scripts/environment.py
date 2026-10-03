@@ -104,6 +104,20 @@ def active_authority_prefix(policy: EnvironmentPolicy) -> Path | None:
     return None
 
 
+def authority_python_path(
+    policy: EnvironmentPolicy,
+    prefix: str | Path | None = None,
+) -> Path | None:
+    resolved_prefix = (
+        Path(prefix) if prefix is not None else active_authority_prefix(policy)
+    )
+    if resolved_prefix is None:
+        return None
+    if policy.authority == "conda":
+        return resolved_prefix / ("python.exe" if IS_WINDOWS else "bin/python")
+    return None
+
+
 def require_active_authority(policy: EnvironmentPolicy) -> Path:
     prefix = active_authority_prefix(policy)
     if prefix is None:
