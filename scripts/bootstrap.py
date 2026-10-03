@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-VENV = ROOT / ".venv"
-META = VENV / ".project-source-python.json"
-IS_WINDOWS = os.name == "nt"
-VENV_PYTHON = VENV / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
+from environment import (
+    EnvironmentContractError,
+    ROOT,
+    load_policy,
+    provenance_matches,
+    provenance_record,
+    read_provenance,
+    require_active_authority,
+    uv_module_args,
+)
+
+POLICY = load_policy()
+VENV = POLICY.venv
+VENV_PYTHON = POLICY.venv_python
+META = POLICY.provenance_path
 
 
 def run(*args: str) -> None:
@@ -18,82 +26,56 @@ def run(*args: str) -> None:
     subprocess.run(args, cwd=ROOT, check=True)
 
 
-def normalized(path: str | Path) -> str:
-    return os.path.normcase(os.path.abspath(str(path)))
-
-
-def inside(path: str | Path, parent: str | Path) -> bool:
-    try:
-        return os.path.commonpath([normalized(path), normalized(parent)]) == normalized(parent)
-    except ValueError:
-        return False
-
-
-def read_metadata() -> dict:
-    try:
-        return json.loads(META.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def metadata_matches_active_conda(metadata: dict, conda_prefix: str) -> bool:
-    source_python = metadata.get("source_python")
-    source_version = metadata.get("source_python_version")
-    source_conda = metadata.get("source_conda_prefix")
-    return bool(
-        source_python
-        and source_version
-        and source_conda
-        and normalized(source_python) == normalized(sys.executable)
-        and source_version == sys.version.split()[0]
-        and normalized(source_conda) == normalized(conda_prefix)
-    )
-
-
 def main() -> int:
-    conda_prefix = os.environ.get("CONDA_PREFIX")
-    if not conda_prefix:
-        print("ERROR: no active Conda environment.")
-        print("Activate the intended Conda environment, then run: make bootstrap")
+    try:
+        authority_prefix = require_active_authority(POLICY)
+    except EnvironmentContractError as exc:
+        print(f"ERROR: {exc}.")
+        print("Activate the intended environment, then run: make bootstrap")
         return 2
 
-    if not inside(sys.executable, conda_prefix):
-        print("ERROR: current Python is not inside CONDA_PREFIX.")
-        print(f"python={sys.executable}")
-        print(f"CONDA_PREFIX={conda_prefix}")
-        return 2
-
-    print(f"Conda Python authority: {sys.executable}")
+    print(f"{POLICY.authority.title()} Python authority: {sys.executable}")
     print(f"Python version: {sys.version.split()[0]}")
 
-    # uv belongs to the active Conda environment, never to an unrelated PATH install.
+    # uv belongs to the configured authority environment, never an unrelated PATH install.
     run(sys.executable, "-m", "pip", "install", "--upgrade", "uv")
-    run(sys.executable, "-m", "uv", "--version")
+    run(sys.executable, *uv_module_args(POLICY, "--version"))
 
     if VENV.exists():
         if not VENV_PYTHON.exists():
-            print("ERROR: .venv exists but its Python executable is missing.")
+            print(f"ERROR: {VENV.name} exists but its Python executable is missing.")
             print("Run: make env-rebuild")
             return 3
-        metadata = read_metadata()
+        metadata = read_provenance(POLICY)
         if not metadata:
-            print("ERROR: .venv exists without trustworthy source metadata.")
+            print(f"ERROR: {VENV.name} exists without trustworthy source metadata.")
             print("Run: make env-rebuild")
             return 3
-        if not metadata_matches_active_conda(metadata, conda_prefix):
-            print("ERROR: .venv provenance does not match the active Conda Python.")
+        if not provenance_matches(
+            POLICY,
+            metadata,
+            authority_prefix=authority_prefix,
+        ):
+            print(
+                "ERROR: project .venv provenance does not match "
+                f"the active {POLICY.authority.title()} Python."
+            )
             print("Run: make env-rebuild")
             return 3
-        print("Existing .venv provenance matches the active Conda environment.")
+        print(
+            "Existing .venv provenance matches "
+            f"the active {POLICY.authority.title()} environment."
+        )
     else:
-        run(sys.executable, "-m", "uv", "venv", str(VENV), "--python", sys.executable)
-        metadata = {
-            "source_python": str(Path(sys.executable).resolve()),
-            "source_python_version": sys.version.split()[0],
-            "source_conda_prefix": str(Path(conda_prefix).resolve()),
-            "created_by": "make bootstrap",
-            "uv_invocation": f"{sys.executable} -m uv",
-        }
+        run(
+            sys.executable,
+            *uv_module_args(POLICY, "venv", str(VENV), "--python", sys.executable),
+        )
+        metadata = provenance_record(
+            POLICY,
+            authority_prefix=authority_prefix,
+            created_by="make bootstrap",
+        )
         META.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
     if not VENV_PYTHON.exists():
