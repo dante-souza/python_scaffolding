@@ -2,7 +2,7 @@
 
 Reusable repository scaffold for Python projects with a **Makefile-first workflow**, a **Bash command adapter**, **Conda-owned Python selection**, **Conda-local `uv`**, explicit `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer.
 
-The template is intentionally opinionated about **workflow**, not about the Python version: there is no `.python-version` and no `requires-python` declaration. The active Conda environment is the authority.
+The template is intentionally opinionated about **workflow** and explicit about compatibility: `requires-python = ">=3.11"` records the runtime floor required by the scaffold, while the active Conda environment remains the authority that selects the exact Python interpreter/version. There is no `.python-version` pin.
 
 ## Core contract
 
@@ -133,7 +133,7 @@ make doctor-force-color
 
 ## Command interface policy
 
-The Makefile is the canonical human-facing interface. `project.sh` is a supported Bash adapter exposing the same command names for environments where a shell-native entry point is useful. Both are intentionally thin and delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code.
+The Makefile is the canonical human-facing interface. `project.sh` is a supported Bash adapter exposing the same command names for environments where a shell-native entry point is useful. Both are intentionally thin and delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. Commands that execute or mutate the managed project environment verify `.venv` provenance against the active Conda interpreter before proceeding.
 
 For humans and coding agents, recurring repository operations belong behind the stable project command surface. Direct tool commands are implementation details unless debugging the command layer itself.
 
@@ -198,3 +198,8 @@ At minimum, replace:
 - this README title/description.
 
 Keep the environment contract unless the new repository intentionally adopts a different Python authority model.
+
+
+## License
+
+This repository is licensed under the GNU Affero General Public License v3.0. See `LICENSE`.

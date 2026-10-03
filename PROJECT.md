@@ -14,7 +14,7 @@ Provide a dependable starting point for Python repositories that makes environme
 ## Design principles
 
 1. **Conda is the Python authority.** The active Conda environment selects the interpreter and Python version.
-2. **No repository Python pin.** Do not add `.python-version` or `project.requires-python` unless the project deliberately changes this policy.
+2. **Compatibility is explicit; selection remains with Conda.** `project.requires-python` declares the supported runtime floor (currently Python 3.11+), while the active Conda environment selects the exact interpreter/version. Do not add `.python-version` under the default policy.
 3. **`uv` is project-controlled.** Bootstrap installs/updates `uv` in the active Conda environment and project automation calls it via `python -m uv`.
 4. **`.venv` is reproducible and attributable.** Its source interpreter, Python version and Conda prefix are recorded in `.venv/.project-source-python.json`.
 5. **Makefile is the canonical routine entry point.** Repeated developer actions should be represented as Make targets; `project.sh` mirrors that command surface for Bash users and delegates to the same Python dispatcher.
