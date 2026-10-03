@@ -92,7 +92,10 @@ def test_provenance_matches_normalized_paths(tmp_path: Path) -> None:
     )
 
 
-def test_expected_provenance_requires_authority_prefix() -> None:
+def test_expected_provenance_requires_authority_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CONDA_PREFIX", raising=False)
     policy = EnvironmentPolicy(
         authority="conda",
         venv_name=".venv",
@@ -101,7 +104,7 @@ def test_expected_provenance_requires_authority_prefix() -> None:
     )
 
     with pytest.raises(EnvironmentContractError, match="cannot build provenance"):
-        expected_provenance(policy, authority_prefix=None)
+        expected_provenance(policy)
 
 
 def test_uv_module_args_preserve_existing_invocation_contract() -> None:
