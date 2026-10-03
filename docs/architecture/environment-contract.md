@@ -1,16 +1,26 @@
 # Environment Contract
 
+## Policy source
+
+`environment.toml` is the declarative environment-policy source. `scripts/environment.py` is the single implementation layer that interprets authority, uv invocation, `.venv` paths and provenance rules. Phase 1 centralizes the existing Conda behavior; it does not enable native-`uv` authority.
+
 ## Authority chain
 
 ```mermaid
 flowchart TD
+    CFG[environment.toml] --> ENV[scripts/environment.py]
+    ENV --> CLI[scripts/repo.py]
+    ENV --> BOOT[scripts/bootstrap.py]
+    ENV --> DOC[scripts/doctor.py]
     C[Active Conda environment] --> P[Python interpreter/version]
     P --> U[Conda-local uv via python -m uv]
     P --> V[Project .venv]
     U --> V
     V --> M[.venv/.project-source-python.json]
     V --> D[Project dependencies]
-    CLI[scripts/repo.py] --> C
+    CLI --> C
+    BOOT --> C
+    DOC --> C
     CLI --> U
     CLI --> V
     MK[Makefile - canonical] --> CLI

@@ -1,6 +1,6 @@
 # Python Project Base
 
-Reusable repository scaffold for Python projects with a **Makefile-first workflow**, a **Bash command adapter**, **Conda-owned Python selection**, **Conda-local `uv`**, explicit `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer.
+Reusable repository scaffold for Python projects with a **Makefile-first workflow**, a **Bash command adapter**, an explicit environment-policy contract, `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer. The canonical policy lives in `environment.toml`; the current supported authority is Conda.
 
 The template is intentionally opinionated about **workflow** and explicit about compatibility: `requires-python = ">=3.11"` records the runtime floor required by the scaffold, while the active Conda environment remains the authority that selects the exact Python interpreter/version. There is no `.python-version` pin.
 
@@ -100,11 +100,13 @@ make doctor-force-color
 ├── Makefile
 ├── project.sh
 ├── pyproject.toml
+├── environment.toml
 ├── config/
 │   ├── console-colors.json
 │   └── doctor-theme.json
 ├── scripts/
 │   ├── _console.py
+│   ├── environment.py
 │   ├── bootstrap.py
 │   ├── doctor.py
 │   ├── repo.py
@@ -133,7 +135,7 @@ make doctor-force-color
 
 ## Command interface policy
 
-The Makefile is the canonical human-facing interface. `project.sh` is a supported Bash adapter exposing the same command names for environments where a shell-native entry point is useful. Both are intentionally thin and delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. Commands that execute or mutate the managed project environment verify `.venv` provenance against the active Conda interpreter before proceeding.
+The Makefile is the canonical human-facing interface. `project.sh` is a supported Bash adapter exposing the same command names for environments where a shell-native entry point is useful. Both are intentionally thin and delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. `environment.toml` declares environment policy, and `scripts/environment.py` is the single implementation layer that interprets it. Commands that execute or mutate the managed project environment verify `.venv` provenance against the configured authority before proceeding.
 
 For humans and coding agents, recurring repository operations belong behind the stable project command surface. Direct tool commands are implementation details unless debugging the command layer itself.
 
