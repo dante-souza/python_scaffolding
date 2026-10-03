@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Keep this file LF-terminated; .gitattributes enforces POSIX line endings.
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

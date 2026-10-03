@@ -28,6 +28,7 @@ Makefile / project.sh / project.ps1
 
 The shell layer may:
 
+- rely on repository attributes that preserve POSIX shell scripts with LF line endings;
 - resolve the repository root;
 - resolve the requested Python command;
 - verify that Python can actually start;
