@@ -123,6 +123,14 @@ def authority_uv_path(policy: EnvironmentPolicy, prefix: Path | None) -> Path | 
     return prefix / ("Scripts/uv.exe" if IS_WINDOWS else "bin/uv")
 
 
+def uv_module_args(policy: EnvironmentPolicy, *args: str) -> list[str]:
+    if policy.uv_invocation != "python-module":
+        raise EnvironmentContractError(
+            f"unsupported uv invocation in Phase 1: {policy.uv_invocation!r}"
+        )
+    return ["-m", "uv", *args]
+
+
 def read_provenance(policy: EnvironmentPolicy) -> dict:
     try:
         return json.loads(policy.provenance_path.read_text(encoding="utf-8"))
@@ -137,7 +145,11 @@ def expected_provenance(
     python_version: str | None = None,
     authority_prefix: str | Path | None = None,
 ) -> dict[str, str]:
-    prefix = Path(authority_prefix) if authority_prefix is not None else active_authority_prefix(policy)
+    prefix = (
+        Path(authority_prefix)
+        if authority_prefix is not None
+        else active_authority_prefix(policy)
+    )
     if prefix is None:
         raise EnvironmentContractError(
             f"cannot build provenance without an active {policy.authority} environment"
@@ -147,6 +159,22 @@ def expected_provenance(
         "source_python_version": python_version or sys.version.split()[0],
         "source_conda_prefix": normalized(prefix),
     }
+
+
+def provenance_record(
+    policy: EnvironmentPolicy,
+    *,
+    authority_prefix: str | Path,
+    created_by: str,
+) -> dict[str, str]:
+    record = expected_provenance(policy, authority_prefix=authority_prefix)
+    record.update(
+        {
+            "created_by": created_by,
+            "uv_invocation": f"{sys.executable} -m uv",
+        }
+    )
+    return record
 
 
 def provenance_matches(
