@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -55,9 +56,42 @@ def require_conda() -> None:
         raise SystemExit("ERROR: current Python is not inside the active Conda environment.")
 
 
+def normalized(path: str | Path) -> str:
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
 def require_venv() -> None:
     if not VENV_PYTHON.exists():
         raise SystemExit("ERROR: project .venv is missing. Run: make setup (or ./project.sh setup)")
+
+
+def require_venv_provenance() -> None:
+    require_conda()
+    require_venv()
+    metadata_path = VENV / ".project-source-python.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise SystemExit(
+            "ERROR: project .venv provenance is missing or invalid. Run: make env-rebuild"
+        ) from None
+
+    conda_prefix = os.environ["CONDA_PREFIX"]
+    expected = {
+        "source_python": normalized(sys.executable),
+        "source_python_version": sys.version.split()[0],
+        "source_conda_prefix": normalized(conda_prefix),
+    }
+    actual = {
+        "source_python": normalized(metadata.get("source_python", "")),
+        "source_python_version": metadata.get("source_python_version"),
+        "source_conda_prefix": normalized(metadata.get("source_conda_prefix", "")),
+    }
+    if actual != expected:
+        raise SystemExit(
+            "ERROR: project .venv provenance does not match the active Conda Python. "
+            "Run: make env-rebuild"
+        )
 
 
 def cmd_help() -> None:
@@ -85,8 +119,7 @@ def cmd_bootstrap() -> None:
 
 
 def cmd_sync() -> None:
-    require_conda()
-    require_venv()
+    require_venv_provenance()
     run(["-m", "uv", "sync", "--python", str(VENV_PYTHON)], executable=Path(sys.executable))
 
 
@@ -112,17 +145,17 @@ def cmd_env_rebuild() -> None:
 
 
 def cmd_test() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "pytest"], executable=VENV_PYTHON)
 
 
 def cmd_lint() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "ruff", "check", "src", "tests", "scripts"], executable=VENV_PYTHON)
 
 
 def cmd_format() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "ruff", "format", "src", "tests", "scripts"], executable=VENV_PYTHON)
     run(["-m", "ruff", "check", "--fix", "src", "tests", "scripts"], executable=VENV_PYTHON)
 
@@ -146,7 +179,7 @@ def cmd_check() -> None:
 
 
 def cmd_run() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "project_name"], executable=VENV_PYTHON)
 
 
@@ -154,14 +187,24 @@ def cmd_clean() -> None:
     dirs = [".pytest_cache", ".ruff_cache", "build", "dist", "htmlcov"]
     for rel in dirs:
         p = ROOT / rel
-        if p.exists():
+        if p.is_dir() and not p.is_symlink():
             print(f"Removing {p}")
             shutil.rmtree(p)
-    for p in ROOT.rglob("__pycache__"):
-        shutil.rmtree(p, ignore_errors=True)
-    for p in ROOT.rglob("*.egg-info"):
-        if p.is_dir():
-            shutil.rmtree(p, ignore_errors=True)
+        elif p.exists() or p.is_symlink():
+            print(f"Removing {p}")
+            p.unlink()
+
+    # Never recurse through the whole repository: doing so reaches .venv and can
+    # delete interpreter/package caches that belong to the managed environment.
+    for base in (ROOT / "src", ROOT / "tests", ROOT / "scripts"):
+        if not base.exists():
+            continue
+        for p in base.rglob("__pycache__"):
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p, ignore_errors=True)
+        for p in base.rglob("*.egg-info"):
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p, ignore_errors=True)
 
 
 def main() -> int:
