@@ -75,6 +75,7 @@ def test_resolve_uv_managed_python_uses_explicit_managed_lookup(
                 "find",
                 "3.12",
                 "--managed-python",
+                "--system",
                 "--no-python-downloads",
                 "--no-project",
             ],
@@ -84,6 +85,14 @@ def test_resolve_uv_managed_python_uses_explicit_managed_lookup(
             False,
         )
     ]
+
+
+def test_managed_python_lookup_explicitly_ignores_project_virtualenv() -> None:
+    args = environment_module.uv_python_find_args(uv_policy())
+
+    assert "--managed-python" in args
+    assert "--system" in args
+    assert "--no-project" in args
 
 
 def test_resolve_uv_managed_python_reports_discovery_failure(

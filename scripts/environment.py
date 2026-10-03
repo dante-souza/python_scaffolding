@@ -209,6 +209,7 @@ def uv_python_find_args(policy: EnvironmentPolicy) -> list[str]:
         "find",
         policy.python_request,
         "--managed-python",
+        "--system",
         "--no-python-downloads",
         "--no-project",
     ]

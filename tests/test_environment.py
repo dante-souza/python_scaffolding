@@ -257,6 +257,7 @@ def test_uv_authority_builds_explicit_managed_python_commands() -> None:
         "find",
         "3.12",
         "--managed-python",
+        "--system",
         "--no-python-downloads",
         "--no-project",
     ]
