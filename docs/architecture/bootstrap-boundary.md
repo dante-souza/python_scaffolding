@@ -70,6 +70,17 @@ Phase 2C makes the successful handoff explicit and testable.
 
 This split prevents the dispatcher from re-encoding authority rules and prevents recursive handoff once execution is already under the authority Python.
 
+The dispatcher behavior is covered separately from environment selection:
+
+- no target means no handoff subprocess is created;
+- command arguments are preserved when the command is re-executed;
+- the authority child process exit code becomes the dispatcher exit code;
+- after a handoff, the bootstrap interpreter does not execute the command locally;
+- without a handoff, the local command executes exactly once;
+- `help` remains available without requiring authority handoff.
+
+Together with the environment-layer tests that return no target when already running under the authority Python, these checks prove the handoff is single-pass rather than recursive.
+
 ## Boundary rule
 
 Finding a Python executable does not make that interpreter the project authority.
