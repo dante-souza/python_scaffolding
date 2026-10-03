@@ -5,8 +5,8 @@ import subprocess
 import sys
 
 from environment import (
-    EnvironmentContractError,
     ROOT,
+    EnvironmentContractError,
     load_policy,
     provenance_matches,
     provenance_record,

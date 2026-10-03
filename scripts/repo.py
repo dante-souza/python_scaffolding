@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 from environment import (
-    EnvironmentContractError,
     ROOT,
+    EnvironmentContractError,
     load_policy,
     provenance_matches,
     read_provenance,
