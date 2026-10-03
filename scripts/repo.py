@@ -61,7 +61,10 @@ def require_authority() -> Path:
 
 def require_venv() -> None:
     if not VENV_PYTHON.exists():
-        raise SystemExit(\n            "ERROR: project .venv is missing. Run: make setup "\n            "(or ./project.sh setup / .\\\\project.ps1 setup)"\n        )
+        raise SystemExit(
+            "ERROR: project .venv is missing. Run: make setup "
+            "(or ./project.sh setup / .\\project.ps1 setup)"
+        )
 
 
 def require_venv_provenance() -> None:
