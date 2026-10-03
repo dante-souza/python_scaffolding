@@ -278,6 +278,33 @@ def resolve_authority_python(
     return resolve_uv_managed_python(policy, uv_executable=uv_executable)
 
 
+def python_executable_version(executable: str | Path) -> str:
+    python = Path(executable)
+    if not python.is_file():
+        raise EnvironmentContractError(f"Python executable does not exist: {python}")
+
+    completed = subprocess.run(
+        [str(python), "-c", "import sys; print(sys.version.split()[0])"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        suffix = f": {detail}" if detail else ""
+        raise EnvironmentContractError(
+            f"could not query Python version from {python}{suffix}"
+        )
+
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise EnvironmentContractError(
+            f"unexpected Python version probe result from {python}"
+        )
+    return lines[0]
+
+
 def read_provenance(policy: EnvironmentPolicy) -> dict:
     try:
         return json.loads(policy.provenance_path.read_text(encoding="utf-8"))
@@ -292,35 +319,62 @@ def expected_provenance(
     python_version: str | None = None,
     authority_prefix: str | Path | None = None,
 ) -> dict[str, str]:
-    prefix = (
-        Path(authority_prefix)
-        if authority_prefix is not None
-        else active_authority_prefix(policy)
-    )
-    if prefix is None:
-        raise EnvironmentContractError(
-            f"cannot build provenance without an active {policy.authority} environment"
-        )
-    return {
+    version = python_version
+    if version is None:
+        if normalized(python_executable) == normalized(sys.executable):
+            version = sys.version.split()[0]
+        else:
+            version = python_executable_version(python_executable)
+
+    expected = {
         "source_python": normalized(python_executable),
-        "source_python_version": python_version or sys.version.split()[0],
-        "source_conda_prefix": normalized(prefix),
+        "source_python_version": version,
     }
+
+    if policy.authority == "conda":
+        prefix = (
+            Path(authority_prefix)
+            if authority_prefix is not None
+            else active_authority_prefix(policy)
+        )
+        if prefix is None:
+            raise EnvironmentContractError(
+                "cannot build provenance without an active conda environment"
+            )
+        expected["source_conda_prefix"] = normalized(prefix)
+    else:
+        expected["source_uv_request"] = policy.python_request
+
+    return expected
 
 
 def provenance_record(
     policy: EnvironmentPolicy,
     *,
-    authority_prefix: str | Path,
     created_by: str,
+    python_executable: str | Path = sys.executable,
+    python_version: str | None = None,
+    authority_prefix: str | Path | None = None,
+    uv_executable: str | Path | None = None,
 ) -> dict[str, str]:
-    record = expected_provenance(policy, authority_prefix=authority_prefix)
-    record.update(
-        {
-            "created_by": created_by,
-            "uv_invocation": f"{sys.executable} -m uv",
-        }
+    record = expected_provenance(
+        policy,
+        python_executable=python_executable,
+        python_version=python_version,
+        authority_prefix=authority_prefix,
     )
+    record["source_authority"] = policy.authority
+    record["created_by"] = created_by
+
+    if policy.authority == "conda":
+        record["uv_invocation"] = f"{python_executable} -m uv"
+    else:
+        if uv_executable is None:
+            raise EnvironmentContractError(
+                "native uv provenance requires the uv executable path"
+            )
+        record["uv_invocation"] = str(Path(uv_executable))
+
     return record
 
 
@@ -338,9 +392,22 @@ def provenance_matches(
         python_version=python_version,
         authority_prefix=authority_prefix,
     )
-    actual = {
-        "source_python": normalized(metadata.get("source_python", "")),
-        "source_python_version": metadata.get("source_python_version"),
-        "source_conda_prefix": normalized(metadata.get("source_conda_prefix", "")),
-    }
+
+    if policy.authority == "conda":
+        if metadata.get("source_authority", "conda") != "conda":
+            return False
+        actual = {
+            "source_python": normalized(metadata.get("source_python", "")),
+            "source_python_version": metadata.get("source_python_version"),
+            "source_conda_prefix": normalized(metadata.get("source_conda_prefix", "")),
+        }
+    else:
+        if metadata.get("source_authority") != "uv":
+            return False
+        actual = {
+            "source_python": normalized(metadata.get("source_python", "")),
+            "source_python_version": metadata.get("source_python_version"),
+            "source_uv_request": metadata.get("source_uv_request"),
+        }
+
     return actual == expected
