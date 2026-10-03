@@ -118,6 +118,20 @@ def authority_python_path(
     return None
 
 
+def authority_handoff_target(
+    policy: EnvironmentPolicy,
+    *,
+    current_python: str | Path = sys.executable,
+    authority_prefix: str | Path | None = None,
+) -> Path | None:
+    target = authority_python_path(policy, authority_prefix)
+    if target is None or not target.is_file():
+        return None
+    if normalized(current_python) == normalized(target):
+        return None
+    return target
+
+
 def require_active_authority(policy: EnvironmentPolicy) -> Path:
     prefix = active_authority_prefix(policy)
     if prefix is None:
