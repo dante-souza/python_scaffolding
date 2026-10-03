@@ -1,11 +1,15 @@
 # Canonical environment-policy configuration.
-# Phase 1 extracts policy from implementation; only the existing Conda authority
-# is supported here. Native uv authority is intentionally deferred to Phase 4.
+# Conda remains the repository default while Phase 4 introduces native uv
+# as an alternate Python authority. The explicit Python request is consumed
+# by native-uv mode; Conda mode continues to use the active Conda interpreter.
 
 [environment]
 authority = "conda"
 venv = ".venv"
 provenance_file = ".project-source-python.json"
+
+[python]
+request = "3.12"
 
 [uv]
 invocation = "python-module"

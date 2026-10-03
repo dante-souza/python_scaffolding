@@ -22,6 +22,7 @@ class EnvironmentPolicy:
     venv_name: str
     provenance_file: str
     uv_invocation: str
+    python_request: str = ""
 
     @property
     def venv(self) -> Path:
@@ -46,6 +47,7 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
         raise EnvironmentContractError(f"environment policy is invalid TOML: {path}") from exc
 
     environment = raw.get("environment", {})
+    python = raw.get("python", {})
     uv = raw.get("uv", {})
 
     policy = EnvironmentPolicy(
@@ -53,6 +55,7 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
         venv_name=str(environment.get("venv", "")).strip(),
         provenance_file=str(environment.get("provenance_file", "")).strip(),
         uv_invocation=str(uv.get("invocation", "")).strip(),
+        python_request=str(python.get("request", "")).strip(),
     )
 
     missing = [
@@ -61,6 +64,7 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
             ("environment.authority", policy.authority),
             ("environment.venv", policy.venv_name),
             ("environment.provenance_file", policy.provenance_file),
+            ("python.request", policy.python_request),
             ("uv.invocation", policy.uv_invocation),
         )
         if not value
@@ -70,15 +74,13 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
             "environment policy is missing required values: " + ", ".join(missing)
         )
 
-    # Phase 1 is an architecture extraction, not a policy expansion.
-    # Native uv authority is introduced and proven separately in Phase 4.
-    if policy.authority != "conda":
+    if policy.authority not in {"conda", "uv"}:
         raise EnvironmentContractError(
-            f"unsupported environment authority in Phase 1: {policy.authority!r}"
+            f"unsupported environment authority: {policy.authority!r}"
         )
     if policy.uv_invocation != "python-module":
         raise EnvironmentContractError(
-            f"unsupported uv invocation in Phase 1: {policy.uv_invocation!r}"
+            f"unsupported uv invocation: {policy.uv_invocation!r}"
         )
 
     return policy
@@ -152,11 +154,38 @@ def authority_uv_path(policy: EnvironmentPolicy, prefix: Path | None) -> Path | 
 
 
 def uv_module_args(policy: EnvironmentPolicy, *args: str) -> list[str]:
+    if policy.authority != "conda":
+        raise EnvironmentContractError(
+            "python-module uv invocation is only valid under Conda authority"
+        )
     if policy.uv_invocation != "python-module":
         raise EnvironmentContractError(
-            f"unsupported uv invocation in Phase 1: {policy.uv_invocation!r}"
+            f"unsupported uv invocation: {policy.uv_invocation!r}"
         )
     return ["-m", "uv", *args]
+
+
+def uv_python_install_args(policy: EnvironmentPolicy) -> list[str]:
+    if policy.authority != "uv":
+        raise EnvironmentContractError(
+            "uv-managed Python installation requires authority = 'uv'"
+        )
+    return ["python", "install", policy.python_request]
+
+
+def uv_python_find_args(policy: EnvironmentPolicy) -> list[str]:
+    if policy.authority != "uv":
+        raise EnvironmentContractError(
+            "uv-managed Python discovery requires authority = 'uv'"
+        )
+    return [
+        "python",
+        "find",
+        policy.python_request,
+        "--managed-python",
+        "--no-python-downloads",
+        "--no-project",
+    ]
 
 
 def read_provenance(policy: EnvironmentPolicy) -> dict:
