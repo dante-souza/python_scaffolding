@@ -8,10 +8,8 @@ from pathlib import Path
 from environment import (
     ROOT,
     EnvironmentContractError,
-    active_authority_prefix,
-    authority_python_path,
+    authority_handoff_target,
     load_policy,
-    normalized,
     provenance_matches,
     read_provenance,
     require_active_authority,
@@ -56,15 +54,12 @@ def run_script(name: str, *args: str) -> None:
 
 
 def handoff_to_authority() -> int | None:
-    prefix = active_authority_prefix(POLICY)
-    authority_python = authority_python_path(POLICY, prefix)
-    if authority_python is None or not authority_python.is_file():
-        return None
-    if normalized(sys.executable) == normalized(authority_python):
+    target = authority_handoff_target(POLICY)
+    if target is None:
         return None
 
     completed = subprocess.run(
-        [str(authority_python), str(ROOT / "scripts" / "repo.py"), *sys.argv[1:]],
+        [str(target), str(ROOT / "scripts" / "repo.py"), *sys.argv[1:]],
         cwd=ROOT,
         check=False,
     )

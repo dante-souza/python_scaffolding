@@ -56,8 +56,22 @@ On either failure, the adapter reports a compact bootstrap context including the
 
 Bash also reports `MSYSTEM` and `WSL_DISTRO_NAME`. When a Python startup failure occurs under WSL, it explains that WSL needs a Python executable runnable inside WSL; inheriting a Windows/Cygwin Python through `PATH` does not create a valid WSL Python environment.
 
+## Authority handoff contract
+
+Phase 2C makes the successful handoff explicit and testable.
+
+`scripts/environment.py` owns handoff selection through `authority_handoff_target()`. The selector returns an authority interpreter only when:
+
+- the configured authority can resolve a Python path;
+- that interpreter exists;
+- the current bootstrap interpreter is different from the authority interpreter.
+
+`scripts/repo.py` owns execution only: when a target is returned, it re-runs the same command under that interpreter and propagates the child exit code. When no target is returned, dispatch continues in the current interpreter and the existing Python policy checks remain authoritative.
+
+This split prevents the dispatcher from re-encoding authority rules and prevents recursive handoff once execution is already under the authority Python.
+
 ## Boundary rule
 
 Finding a Python executable does not make that interpreter the project authority.
 
-The shell only needs a compatible bootstrap interpreter. Once `scripts/repo.py` starts, the shared environment layer resolves the configured authority and hands policy-sensitive commands to its Python interpreter.
+The shell only needs a compatible bootstrap interpreter. Once `scripts/repo.py` starts, the shared environment layer decides whether an authority handoff is required before policy-sensitive commands continue.

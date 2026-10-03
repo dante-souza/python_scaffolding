@@ -12,6 +12,7 @@ from environment import (  # noqa: E402
     IS_WINDOWS,
     EnvironmentContractError,
     EnvironmentPolicy,
+    authority_handoff_target,
     authority_python_path,
     expected_provenance,
     inside,
@@ -71,6 +72,76 @@ def test_authority_python_path_resolves_conda_interpreter(tmp_path: Path) -> Non
     expected = prefix / ("python.exe" if IS_WINDOWS else "bin/python")
 
     assert authority_python_path(policy, prefix) == expected
+
+
+def test_authority_handoff_target_requires_existing_authority_python(
+    tmp_path: Path,
+) -> None:
+    policy = EnvironmentPolicy(
+        authority="conda",
+        venv_name=".venv",
+        provenance_file=".project-source-python.json",
+        uv_invocation="python-module",
+    )
+    prefix = tmp_path / "conda"
+
+    assert (
+        authority_handoff_target(
+            policy,
+            current_python=tmp_path / "bootstrap" / "python",
+            authority_prefix=prefix,
+        )
+        is None
+    )
+
+
+def test_authority_handoff_target_skips_when_already_on_authority_python(
+    tmp_path: Path,
+) -> None:
+    policy = EnvironmentPolicy(
+        authority="conda",
+        venv_name=".venv",
+        provenance_file=".project-source-python.json",
+        uv_invocation="python-module",
+    )
+    prefix = tmp_path / "conda"
+    authority_python = authority_python_path(policy, prefix)
+    assert authority_python is not None
+    authority_python.parent.mkdir(parents=True, exist_ok=True)
+    authority_python.touch()
+
+    assert (
+        authority_handoff_target(
+            policy,
+            current_python=authority_python,
+            authority_prefix=prefix,
+        )
+        is None
+    )
+
+
+def test_authority_handoff_target_selects_different_authority_python(
+    tmp_path: Path,
+) -> None:
+    policy = EnvironmentPolicy(
+        authority="conda",
+        venv_name=".venv",
+        provenance_file=".project-source-python.json",
+        uv_invocation="python-module",
+    )
+    prefix = tmp_path / "conda"
+    authority_python = authority_python_path(policy, prefix)
+    assert authority_python is not None
+    authority_python.parent.mkdir(parents=True, exist_ok=True)
+    authority_python.touch()
+
+    target = authority_handoff_target(
+        policy,
+        current_python=tmp_path / "bootstrap" / "python",
+        authority_prefix=prefix,
+    )
+
+    assert target == authority_python
 
 
 def test_provenance_matches_normalized_paths(tmp_path: Path) -> None:
