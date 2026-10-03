@@ -8,6 +8,7 @@ from pathlib import Path
 from environment import (
     ROOT,
     EnvironmentContractError,
+    authority_handoff_target,
     load_policy,
     provenance_matches,
     read_provenance,
@@ -52,6 +53,19 @@ def run_script(name: str, *args: str) -> None:
     run([str(ROOT / "scripts" / name), *args], executable=Path(sys.executable))
 
 
+def handoff_to_authority() -> int | None:
+    target = authority_handoff_target(POLICY)
+    if target is None:
+        return None
+
+    completed = subprocess.run(
+        [str(target), str(ROOT / "scripts" / "repo.py"), *sys.argv[1:]],
+        cwd=ROOT,
+        check=False,
+    )
+    return completed.returncode
+
+
 def require_authority() -> Path:
     try:
         return require_active_authority(POLICY)
@@ -61,7 +75,10 @@ def require_authority() -> Path:
 
 def require_venv() -> None:
     if not VENV_PYTHON.exists():
-        raise SystemExit("ERROR: project .venv is missing. Run: make setup (or ./project.sh setup)")
+        raise SystemExit(
+            "ERROR: project .venv is missing. Run: make setup "
+            "(or ./project.sh setup / .\\project.ps1 setup)"
+        )
 
 
 def require_venv_provenance() -> None:
@@ -84,11 +101,16 @@ def require_venv_provenance() -> None:
 
 
 def cmd_help() -> None:
-    print("Project commands (Makefile is canonical; ./project.sh is the Bash adapter):\n")
+    print(
+        "Project commands "
+        "(Makefile is canonical; project.sh and project.ps1 are shell adapters):\n"
+    )
     width = max(map(len, TARGETS))
     for name, description in TARGETS.items():
         print(f"  make {name:<{width}}  {description}")
-    print("\nBash equivalent: ./project.sh <command>")
+    print("\nShell adapters:")
+    print("  Bash:       ./project.sh <command>")
+    print(r"  PowerShell: .\project.ps1 <command>")
 
 
 def cmd_doctor() -> None:
@@ -215,6 +237,12 @@ def main() -> int:
         print(f"Unknown command: {sys.argv[1]}")
         cmd_help()
         return 2
+
+    if command != "help":
+        handed_off = handoff_to_authority()
+        if handed_off is not None:
+            return handed_off
+
     try:
         fn()
     except subprocess.CalledProcessError as exc:

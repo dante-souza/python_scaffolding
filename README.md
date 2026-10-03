@@ -1,6 +1,6 @@
 # Python Project Base
 
-Reusable repository scaffold for Python projects with a **Makefile-first workflow**, a **Bash command adapter**, an explicit environment-policy contract, `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer. The canonical policy lives in `environment.toml`; the current supported authority is Conda.
+Reusable repository scaffold for Python projects with a **Makefile-first workflow**, **Bash and PowerShell command adapters**, an explicit environment-policy contract, `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer. The canonical policy lives in `environment.toml`; the current supported authority is Conda.
 
 The template is intentionally opinionated about **workflow** and explicit about compatibility: `requires-python = ">=3.11"` records the runtime floor required by the scaffold, while the active Conda environment remains the authority that selects the exact Python interpreter/version. There is no `.python-version` pin.
 
@@ -23,8 +23,9 @@ Conda environment
           │
           ▼
  Python command dispatcher
-  ├── Makefile      ← canonical human-facing interface
-  └── project.sh    ← Bash adapter
+  ├── Makefile       ← canonical human-facing interface
+  ├── project.sh     ← Bash adapter
+  └── project.ps1    ← PowerShell adapter
 ```
 
 A shell-global `uv` may exist and may even win normal `PATH` resolution. That is observable, but project targets deliberately avoid depending on it.
@@ -46,7 +47,9 @@ make lint
 make check
 ```
 
-From Bash, the equivalent adapter is available:
+Shell-native adapters expose the same command vocabulary.
+
+From Bash:
 
 ```bash
 ./project.sh doctor
@@ -56,9 +59,23 @@ From Bash, the equivalent adapter is available:
 ./project.sh check
 ```
 
-This includes Linux/macOS Bash, WSL, and Git Bash/MSYS2 on Windows when their normal Conda activation is available. The Bash adapter delegates to the same Python command dispatcher as Make, so it does not maintain a second implementation of project behavior.
+This includes Linux/macOS Bash, WSL, and Git Bash/MSYS2 on Windows when their normal Conda activation is available.
 
-Use `make help` or `./project.sh help` for the complete command list.
+From PowerShell:
+
+```powershell
+.\project.ps1 doctor
+.\project.ps1 setup
+.\project.ps1 test
+.\project.ps1 lint
+.\project.ps1 check
+```
+
+Both adapters delegate to the same Python command dispatcher as Make, so neither maintains a second implementation of project behavior.
+
+If Python cannot be resolved or started, the shell adapter prints minimal pre-Python diagnostics before stopping. Exit code `127` means Python was not found; `126` means it was found but could not be started. WSL requires a Python executable runnable inside WSL rather than a Windows/Cygwin interpreter inherited through `PATH`.
+
+Use `make help`, `./project.sh help`, or `.\project.ps1 help` for the complete command list.
 
 ## Environment observability
 
@@ -99,6 +116,7 @@ make doctor-force-color
 ├── README.md
 ├── Makefile
 ├── project.sh
+├── project.ps1
 ├── pyproject.toml
 ├── environment.toml
 ├── config/
@@ -121,6 +139,7 @@ make doctor-force-color
 │   └── reference/
 ├── docs/
 │   ├── architecture/
+│   │   └── bootstrap-boundary.md
 │   └── adr/
 ├── ai/
 │   ├── agents/
@@ -135,7 +154,7 @@ make doctor-force-color
 
 ## Command interface policy
 
-The Makefile is the canonical human-facing interface. `project.sh` is a supported Bash adapter exposing the same command names for environments where a shell-native entry point is useful. Both are intentionally thin and delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. `environment.toml` declares environment policy, and `scripts/environment.py` is the single implementation layer that interprets it. Commands that execute or mutate the managed project environment verify `.venv` provenance against the configured authority before proceeding.
+The Makefile is the canonical human-facing interface. `project.sh` and `project.ps1` are supported Bash and PowerShell adapters exposing the same command names where a shell-native entry point is useful. All three entry points delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. The dispatcher may be launched by a non-authority interpreter (for example an already-active project `.venv`), but when the configured authority is active it hands command execution to that authority's Python before policy-sensitive work proceeds. `environment.toml` declares environment policy, and `scripts/environment.py` is the single implementation layer that interprets it.
 
 For humans and coding agents, recurring repository operations belong behind the stable project command surface. Direct tool commands are implementation details unless debugging the command layer itself.
 
@@ -155,7 +174,7 @@ Important targets:
 | `make check` | Run quality gates plus agent/skill validation. |
 | `make agents-check` | Validate AI policy scaffold. |
 
-Every target above can also be called from Bash as `./project.sh <command>`, for example `./project.sh doctor` or `./project.sh env-rebuild`.
+Every target above can also be called through a shell adapter: Bash uses `./project.sh <command>` and PowerShell uses `.\project.ps1 <command>`.
 
 ## Python source vs notebooks
 
