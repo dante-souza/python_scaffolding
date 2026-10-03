@@ -1,26 +1,34 @@
 from __future__ import annotations
 
-import json
-import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-VENV = ROOT / ".venv"
-IS_WINDOWS = os.name == "nt"
-VENV_PYTHON = VENV / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
+from environment import (
+    EnvironmentContractError,
+    ROOT,
+    load_policy,
+    provenance_matches,
+    read_provenance,
+    require_active_authority,
+    uv_module_args,
+)
+
+POLICY = load_policy()
+VENV = POLICY.venv
+VENV_PYTHON = POLICY.venv_python
+AUTHORITY = POLICY.authority.title()
 
 TARGETS = {
-    "doctor": "Inspect shell/Python/Conda/uv/.venv state and repository policy.",
+    "doctor": f"Inspect shell/Python/{AUTHORITY}/uv/.venv state and repository policy.",
     "doctor-no-color": "Run environment diagnostics without ANSI colors.",
     "doctor-force-color": "Force ANSI colors in environment diagnostics.",
-    "bootstrap": "Install/update uv inside active Conda and create .venv from its Python.",
-    "sync": "Synchronize project dependencies into .venv using Conda-local uv.",
+    "bootstrap": f"Install/update uv inside active {AUTHORITY} and create .venv from its Python.",
+    "sync": "Synchronize project dependencies into .venv using authority-local uv.",
     "setup": "bootstrap + sync + doctor.",
-    "env-rebuild": "Delete .venv and recreate it from the active Conda Python.",
-    "lock": "Refresh uv.lock under the active Conda Python policy.",
+    "env-rebuild": f"Delete .venv and recreate it from the active {AUTHORITY} Python.",
+    "lock": f"Refresh uv.lock under the active {AUTHORITY} Python policy.",
     "test": "Run pytest.",
     "lint": "Run Ruff checks.",
     "format": "Format source/tests/scripts with Ruff.",
@@ -44,20 +52,11 @@ def run_script(name: str, *args: str) -> None:
     run([str(ROOT / "scripts" / name), *args], executable=Path(sys.executable))
 
 
-def require_conda() -> None:
-    prefix = os.environ.get("CONDA_PREFIX")
-    if not prefix:
-        raise SystemExit("ERROR: activate the intended Conda environment first.")
+def require_authority() -> Path:
     try:
-        common = os.path.commonpath([os.path.abspath(sys.executable), os.path.abspath(prefix)])
-    except ValueError:
-        common = ""
-    if os.path.normcase(common) != os.path.normcase(os.path.abspath(prefix)):
-        raise SystemExit("ERROR: current Python is not inside the active Conda environment.")
-
-
-def normalized(path: str | Path) -> str:
-    return os.path.normcase(os.path.abspath(str(path)))
+        return require_active_authority(POLICY)
+    except EnvironmentContractError as exc:
+        raise SystemExit(f"ERROR: {exc}.") from None
 
 
 def require_venv() -> None:
@@ -66,31 +65,21 @@ def require_venv() -> None:
 
 
 def require_venv_provenance() -> None:
-    require_conda()
+    authority_prefix = require_authority()
     require_venv()
-    metadata_path = VENV / ".project-source-python.json"
-    try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    metadata = read_provenance(POLICY)
+    if not metadata:
         raise SystemExit(
             "ERROR: project .venv provenance is missing or invalid. Run: make env-rebuild"
-        ) from None
-
-    conda_prefix = os.environ["CONDA_PREFIX"]
-    expected = {
-        "source_python": normalized(sys.executable),
-        "source_python_version": sys.version.split()[0],
-        "source_conda_prefix": normalized(conda_prefix),
-    }
-    actual = {
-        "source_python": normalized(metadata.get("source_python", "")),
-        "source_python_version": metadata.get("source_python_version"),
-        "source_conda_prefix": normalized(metadata.get("source_conda_prefix", "")),
-    }
-    if actual != expected:
+        )
+    if not provenance_matches(
+        POLICY,
+        metadata,
+        authority_prefix=authority_prefix,
+    ):
         raise SystemExit(
-            "ERROR: project .venv provenance does not match the active Conda Python. "
-            "Run: make env-rebuild"
+            "ERROR: project .venv provenance does not match "
+            f"the active {AUTHORITY} Python. Run: make env-rebuild"
         )
 
 
@@ -120,12 +109,18 @@ def cmd_bootstrap() -> None:
 
 def cmd_sync() -> None:
     require_venv_provenance()
-    run(["-m", "uv", "sync", "--python", str(VENV_PYTHON)], executable=Path(sys.executable))
+    run(
+        uv_module_args(POLICY, "sync", "--python", str(VENV_PYTHON)),
+        executable=Path(sys.executable),
+    )
 
 
 def cmd_lock() -> None:
-    require_conda()
-    run(["-m", "uv", "lock", "--python", sys.executable], executable=Path(sys.executable))
+    require_authority()
+    run(
+        uv_module_args(POLICY, "lock", "--python", sys.executable),
+        executable=Path(sys.executable),
+    )
 
 
 def cmd_setup() -> None:
@@ -135,7 +130,7 @@ def cmd_setup() -> None:
 
 
 def cmd_env_rebuild() -> None:
-    require_conda()
+    require_authority()
     if VENV.exists():
         print(f"Removing {VENV}")
         shutil.rmtree(VENV)
