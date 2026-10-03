@@ -236,16 +236,16 @@ def main() -> int:
     section("Repository Python policy", enabled=colors)
     kv("python_version_file", version_file, enabled=colors)
     kv("requires_python_declared", bool(requires_python), enabled=colors)
+    kv("requires_python", requires_python or "<missing>", enabled=colors)
     kv("python_authority", "conda", enabled=colors, role="ok")
 
-    major_minor = ".".join(py_version.split(".")[:2])
     section("uv Python resolution", enabled=colors)
     kv(
         "uv_requires_python_source",
-        "pyproject" if requires_python else "interpreter_fallback",
+        "pyproject" if requires_python else "<missing>",
         enabled=colors,
     )
-    kv("uv_effective_requires_python", requires_python or f">={major_minor}", enabled=colors)
+    kv("uv_effective_requires_python", requires_python or "<missing>", enabled=colors)
     kv("uv_resolution_python", sys.executable, enabled=colors)
     kv("uv_resolution_python_version", py_version, enabled=colors)
 
@@ -265,10 +265,9 @@ def main() -> int:
 
     if version_file:
         errors.append(".python-version exists, but Conda must be the sole Python authority")
-    if requires_python:
+    if not requires_python:
         errors.append(
-            "pyproject.toml declares requires-python; this template delegates "
-            "Python selection to Conda"
+            "pyproject.toml does not declare requires-python compatibility"
         )
 
     if not bash_adapter.is_file():
