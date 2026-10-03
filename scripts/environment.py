@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -120,6 +122,30 @@ def authority_python_path(
     return None
 
 
+def native_uv_path(
+    policy: EnvironmentPolicy,
+    *,
+    search_path: str | None = None,
+) -> Path | None:
+    if policy.authority != "uv":
+        return None
+    resolved = shutil.which("uv", path=search_path)
+    return Path(resolved) if resolved else None
+
+
+def require_native_uv(
+    policy: EnvironmentPolicy,
+    *,
+    search_path: str | None = None,
+) -> Path:
+    uv = native_uv_path(policy, search_path=search_path)
+    if uv is None:
+        raise EnvironmentContractError(
+            "native uv authority requires an 'uv' executable on PATH"
+        )
+    return uv
+
+
 def authority_handoff_target(
     policy: EnvironmentPolicy,
     *,
@@ -186,6 +212,70 @@ def uv_python_find_args(policy: EnvironmentPolicy) -> list[str]:
         "--no-python-downloads",
         "--no-project",
     ]
+
+
+def resolve_uv_managed_python(
+    policy: EnvironmentPolicy,
+    *,
+    uv_executable: str | Path | None = None,
+) -> Path:
+    if policy.authority != "uv":
+        raise EnvironmentContractError(
+            "uv-managed Python resolution requires authority = 'uv'"
+        )
+
+    uv = Path(uv_executable) if uv_executable is not None else require_native_uv(policy)
+    if not uv.is_file():
+        raise EnvironmentContractError(f"uv executable does not exist: {uv}")
+
+    completed = subprocess.run(
+        [str(uv), *uv_python_find_args(policy)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        suffix = f": {detail}" if detail else ""
+        raise EnvironmentContractError(
+            "uv could not resolve managed Python "
+            f"{policy.python_request!r}{suffix}"
+        )
+
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise EnvironmentContractError(
+            "uv returned an unexpected managed-Python discovery result"
+        )
+
+    python = Path(lines[0])
+    if not python.is_file():
+        raise EnvironmentContractError(
+            f"uv resolved managed Python to a missing executable: {python}"
+        )
+    return python
+
+
+def resolve_authority_python(
+    policy: EnvironmentPolicy,
+    *,
+    authority_prefix: str | Path | None = None,
+    uv_executable: str | Path | None = None,
+) -> Path:
+    if policy.authority == "conda":
+        python = authority_python_path(policy, authority_prefix)
+        if python is None:
+            raise EnvironmentContractError(
+                "no active conda environment; activate the intended environment first"
+            )
+        if not python.is_file():
+            raise EnvironmentContractError(
+                f"active conda Python executable does not exist: {python}"
+            )
+        return python
+
+    return resolve_uv_managed_python(policy, uv_executable=uv_executable)
 
 
 def read_provenance(policy: EnvironmentPolicy) -> dict:
