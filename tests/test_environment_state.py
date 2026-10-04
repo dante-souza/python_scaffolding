@@ -27,6 +27,16 @@ def policy_for(venv: Path) -> EnvironmentPolicy:
     )
 
 
+def uv_policy_for(venv: Path) -> EnvironmentPolicy:
+    return EnvironmentPolicy(
+        authority="uv",
+        venv_name=str(venv),
+        provenance_file=".project-source-python.json",
+        uv_invocation="python-module",
+        python_request="3.12",
+    )
+
+
 def test_read_provenance_returns_empty_for_missing_file(tmp_path: Path) -> None:
     policy = policy_for(tmp_path / "missing-venv")
 
@@ -95,4 +105,61 @@ def test_provenance_matches_rejects_missing_metadata_fields(tmp_path: Path) -> N
         python_executable=expected_python,
         python_version="3.12.15",
         authority_prefix=prefix,
+    )
+
+
+def test_conda_provenance_accepts_legacy_record_without_authority_field(
+    tmp_path: Path,
+) -> None:
+    policy = policy_for(tmp_path / "venv")
+    prefix = tmp_path / "conda"
+    expected_python = prefix / "python"
+    metadata = {
+        "source_python": normalized(expected_python),
+        "source_python_version": "3.12.15",
+        "source_conda_prefix": normalized(prefix),
+    }
+
+    assert provenance_matches(
+        policy,
+        metadata,
+        python_executable=expected_python,
+        python_version="3.12.15",
+        authority_prefix=prefix,
+    )
+
+
+def test_uv_provenance_matches_managed_python_and_request(tmp_path: Path) -> None:
+    policy = uv_policy_for(tmp_path / "venv")
+    managed_python = tmp_path / "uv-python"
+    metadata = {
+        "source_authority": "uv",
+        "source_python": normalized(managed_python),
+        "source_python_version": "3.12.15",
+        "source_uv_request": "3.12",
+    }
+
+    assert provenance_matches(
+        policy,
+        metadata,
+        python_executable=managed_python,
+        python_version="3.12.15",
+    )
+
+
+def test_uv_provenance_rejects_request_drift(tmp_path: Path) -> None:
+    policy = uv_policy_for(tmp_path / "venv")
+    managed_python = tmp_path / "uv-python"
+    metadata = {
+        "source_authority": "uv",
+        "source_python": normalized(managed_python),
+        "source_python_version": "3.12.15",
+        "source_uv_request": "3.11",
+    }
+
+    assert not provenance_matches(
+        policy,
+        metadata,
+        python_executable=managed_python,
+        python_version="3.12.15",
     )

@@ -1,5 +1,6 @@
 # Canonical human-facing command interface for this repository.
-# Conda chooses Python. uv is managed inside the active Conda environment.
+# environment.toml selects either native uv or Conda as Python authority.
+# The public target vocabulary stays identical in both modes.
 # Recipes stay shell-light so the same Makefile works from Bash/POSIX shells
 # as well as Windows shells supported by GNU Make.
 

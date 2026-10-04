@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ class EnvironmentPolicy:
     venv_name: str
     provenance_file: str
     uv_invocation: str
+    python_request: str = ""
 
     @property
     def venv(self) -> Path:
@@ -46,6 +49,7 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
         raise EnvironmentContractError(f"environment policy is invalid TOML: {path}") from exc
 
     environment = raw.get("environment", {})
+    python = raw.get("python", {})
     uv = raw.get("uv", {})
 
     policy = EnvironmentPolicy(
@@ -53,6 +57,7 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
         venv_name=str(environment.get("venv", "")).strip(),
         provenance_file=str(environment.get("provenance_file", "")).strip(),
         uv_invocation=str(uv.get("invocation", "")).strip(),
+        python_request=str(python.get("request", "")).strip(),
     )
 
     missing = [
@@ -61,6 +66,7 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
             ("environment.authority", policy.authority),
             ("environment.venv", policy.venv_name),
             ("environment.provenance_file", policy.provenance_file),
+            ("python.request", policy.python_request),
             ("uv.invocation", policy.uv_invocation),
         )
         if not value
@@ -70,15 +76,13 @@ def load_policy(path: Path = CONFIG_PATH) -> EnvironmentPolicy:
             "environment policy is missing required values: " + ", ".join(missing)
         )
 
-    # Phase 1 is an architecture extraction, not a policy expansion.
-    # Native uv authority is introduced and proven separately in Phase 4.
-    if policy.authority != "conda":
+    if policy.authority not in {"conda", "uv"}:
         raise EnvironmentContractError(
-            f"unsupported environment authority in Phase 1: {policy.authority!r}"
+            f"unsupported environment authority: {policy.authority!r}"
         )
     if policy.uv_invocation != "python-module":
         raise EnvironmentContractError(
-            f"unsupported uv invocation in Phase 1: {policy.uv_invocation!r}"
+            f"unsupported uv invocation: {policy.uv_invocation!r}"
         )
 
     return policy
@@ -118,6 +122,30 @@ def authority_python_path(
     return None
 
 
+def native_uv_path(
+    policy: EnvironmentPolicy,
+    *,
+    search_path: str | None = None,
+) -> Path | None:
+    if policy.authority != "uv":
+        return None
+    resolved = shutil.which("uv", path=search_path)
+    return Path(resolved) if resolved else None
+
+
+def require_native_uv(
+    policy: EnvironmentPolicy,
+    *,
+    search_path: str | None = None,
+) -> Path:
+    uv = native_uv_path(policy, search_path=search_path)
+    if uv is None:
+        raise EnvironmentContractError(
+            "native uv authority requires an 'uv' executable on PATH"
+        )
+    return uv
+
+
 def authority_handoff_target(
     policy: EnvironmentPolicy,
     *,
@@ -152,11 +180,130 @@ def authority_uv_path(policy: EnvironmentPolicy, prefix: Path | None) -> Path | 
 
 
 def uv_module_args(policy: EnvironmentPolicy, *args: str) -> list[str]:
+    if policy.authority != "conda":
+        raise EnvironmentContractError(
+            "python-module uv invocation is only valid under Conda authority"
+        )
     if policy.uv_invocation != "python-module":
         raise EnvironmentContractError(
-            f"unsupported uv invocation in Phase 1: {policy.uv_invocation!r}"
+            f"unsupported uv invocation: {policy.uv_invocation!r}"
         )
     return ["-m", "uv", *args]
+
+
+def uv_python_install_args(policy: EnvironmentPolicy) -> list[str]:
+    if policy.authority != "uv":
+        raise EnvironmentContractError(
+            "uv-managed Python installation requires authority = 'uv'"
+        )
+    return ["python", "install", policy.python_request]
+
+
+def uv_python_find_args(policy: EnvironmentPolicy) -> list[str]:
+    if policy.authority != "uv":
+        raise EnvironmentContractError(
+            "uv-managed Python discovery requires authority = 'uv'"
+        )
+    return [
+        "python",
+        "find",
+        policy.python_request,
+        "--managed-python",
+        "--system",
+        "--no-python-downloads",
+        "--no-project",
+    ]
+
+
+def resolve_uv_managed_python(
+    policy: EnvironmentPolicy,
+    *,
+    uv_executable: str | Path | None = None,
+) -> Path:
+    if policy.authority != "uv":
+        raise EnvironmentContractError(
+            "uv-managed Python resolution requires authority = 'uv'"
+        )
+
+    uv = Path(uv_executable) if uv_executable is not None else require_native_uv(policy)
+    if not uv.is_file():
+        raise EnvironmentContractError(f"uv executable does not exist: {uv}")
+
+    completed = subprocess.run(
+        [str(uv), *uv_python_find_args(policy)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        suffix = f": {detail}" if detail else ""
+        raise EnvironmentContractError(
+            "uv could not resolve managed Python "
+            f"{policy.python_request!r}{suffix}"
+        )
+
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise EnvironmentContractError(
+            "uv returned an unexpected managed-Python discovery result"
+        )
+
+    python = Path(lines[0])
+    if not python.is_file():
+        raise EnvironmentContractError(
+            f"uv resolved managed Python to a missing executable: {python}"
+        )
+    return python
+
+
+def resolve_authority_python(
+    policy: EnvironmentPolicy,
+    *,
+    authority_prefix: str | Path | None = None,
+    uv_executable: str | Path | None = None,
+) -> Path:
+    if policy.authority == "conda":
+        python = authority_python_path(policy, authority_prefix)
+        if python is None:
+            raise EnvironmentContractError(
+                "no active conda environment; activate the intended environment first"
+            )
+        if not python.is_file():
+            raise EnvironmentContractError(
+                f"active conda Python executable does not exist: {python}"
+            )
+        return python
+
+    return resolve_uv_managed_python(policy, uv_executable=uv_executable)
+
+
+def python_executable_version(executable: str | Path) -> str:
+    python = Path(executable)
+    if not python.is_file():
+        raise EnvironmentContractError(f"Python executable does not exist: {python}")
+
+    completed = subprocess.run(
+        [str(python), "-c", "import sys; print(sys.version.split()[0])"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        suffix = f": {detail}" if detail else ""
+        raise EnvironmentContractError(
+            f"could not query Python version from {python}{suffix}"
+        )
+
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise EnvironmentContractError(
+            f"unexpected Python version probe result from {python}"
+        )
+    return lines[0]
 
 
 def read_provenance(policy: EnvironmentPolicy) -> dict:
@@ -173,35 +320,62 @@ def expected_provenance(
     python_version: str | None = None,
     authority_prefix: str | Path | None = None,
 ) -> dict[str, str]:
-    prefix = (
-        Path(authority_prefix)
-        if authority_prefix is not None
-        else active_authority_prefix(policy)
-    )
-    if prefix is None:
-        raise EnvironmentContractError(
-            f"cannot build provenance without an active {policy.authority} environment"
-        )
-    return {
+    version = python_version
+    if version is None:
+        if normalized(python_executable) == normalized(sys.executable):
+            version = sys.version.split()[0]
+        else:
+            version = python_executable_version(python_executable)
+
+    expected = {
         "source_python": normalized(python_executable),
-        "source_python_version": python_version or sys.version.split()[0],
-        "source_conda_prefix": normalized(prefix),
+        "source_python_version": version,
     }
+
+    if policy.authority == "conda":
+        prefix = (
+            Path(authority_prefix)
+            if authority_prefix is not None
+            else active_authority_prefix(policy)
+        )
+        if prefix is None:
+            raise EnvironmentContractError(
+                "cannot build provenance without an active conda environment"
+            )
+        expected["source_conda_prefix"] = normalized(prefix)
+    else:
+        expected["source_uv_request"] = policy.python_request
+
+    return expected
 
 
 def provenance_record(
     policy: EnvironmentPolicy,
     *,
-    authority_prefix: str | Path,
     created_by: str,
+    python_executable: str | Path = sys.executable,
+    python_version: str | None = None,
+    authority_prefix: str | Path | None = None,
+    uv_executable: str | Path | None = None,
 ) -> dict[str, str]:
-    record = expected_provenance(policy, authority_prefix=authority_prefix)
-    record.update(
-        {
-            "created_by": created_by,
-            "uv_invocation": f"{sys.executable} -m uv",
-        }
+    record = expected_provenance(
+        policy,
+        python_executable=python_executable,
+        python_version=python_version,
+        authority_prefix=authority_prefix,
     )
+    record["source_authority"] = policy.authority
+    record["created_by"] = created_by
+
+    if policy.authority == "conda":
+        record["uv_invocation"] = f"{python_executable} -m uv"
+    else:
+        if uv_executable is None:
+            raise EnvironmentContractError(
+                "native uv provenance requires the uv executable path"
+            )
+        record["uv_invocation"] = str(Path(uv_executable))
+
     return record
 
 
@@ -219,9 +393,22 @@ def provenance_matches(
         python_version=python_version,
         authority_prefix=authority_prefix,
     )
-    actual = {
-        "source_python": normalized(metadata.get("source_python", "")),
-        "source_python_version": metadata.get("source_python_version"),
-        "source_conda_prefix": normalized(metadata.get("source_conda_prefix", "")),
-    }
+
+    if policy.authority == "conda":
+        if metadata.get("source_authority", "conda") != "conda":
+            return False
+        actual = {
+            "source_python": normalized(metadata.get("source_python", "")),
+            "source_python_version": metadata.get("source_python_version"),
+            "source_conda_prefix": normalized(metadata.get("source_conda_prefix", "")),
+        }
+    else:
+        if metadata.get("source_authority") != "uv":
+            return False
+        actual = {
+            "source_python": normalized(metadata.get("source_python", "")),
+            "source_python_version": metadata.get("source_python_version"),
+            "source_uv_request": metadata.get("source_uv_request"),
+        }
+
     return actual == expected

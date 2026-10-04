@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,19 +21,23 @@ from environment import (  # noqa: E402
     normalized,
     provenance_matches,
     uv_module_args,
+    uv_python_find_args,
+    uv_python_install_args,
 )
 
 
 def test_repository_environment_policy_loads() -> None:
     policy = load_policy()
 
-    assert policy.authority == "conda"
+    expected_authority = os.environ.get("SCAFFOLDING_EXPECT_AUTHORITY", "uv")
+    assert policy.authority == expected_authority
+    assert policy.python_request == "3.12"
     assert policy.venv_name == ".venv"
     assert policy.provenance_file == ".project-source-python.json"
     assert policy.uv_invocation == "python-module"
 
 
-def test_load_policy_rejects_phase_4_authority_early(tmp_path: Path) -> None:
+def test_load_policy_accepts_uv_authority(tmp_path: Path) -> None:
     config = tmp_path / "environment.toml"
     config.write_text(
         """
@@ -40,6 +45,33 @@ def test_load_policy_rejects_phase_4_authority_early(tmp_path: Path) -> None:
 authority = "uv"
 venv = ".venv"
 provenance_file = ".project-source-python.json"
+
+[python]
+request = "3.12"
+
+[uv]
+invocation = "python-module"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    policy = load_policy(config)
+
+    assert policy.authority == "uv"
+    assert policy.python_request == "3.12"
+
+
+def test_load_policy_rejects_unknown_authority(tmp_path: Path) -> None:
+    config = tmp_path / "environment.toml"
+    config.write_text(
+        """
+[environment]
+authority = "unknown"
+venv = ".venv"
+provenance_file = ".project-source-python.json"
+
+[python]
+request = "3.12"
 
 [uv]
 invocation = "python-module"
@@ -208,3 +240,40 @@ def test_uv_module_args_preserve_existing_invocation_contract() -> None:
         "--python",
         "python",
     ]
+
+
+def test_uv_authority_builds_explicit_managed_python_commands() -> None:
+    policy = EnvironmentPolicy(
+        authority="uv",
+        venv_name=".venv",
+        provenance_file=".project-source-python.json",
+        uv_invocation="python-module",
+        python_request="3.12",
+    )
+
+    assert uv_python_install_args(policy) == ["python", "install", "3.12"]
+    assert uv_python_find_args(policy) == [
+        "python",
+        "find",
+        "3.12",
+        "--managed-python",
+        "--system",
+        "--no-python-downloads",
+        "--no-project",
+    ]
+
+
+def test_uv_module_args_reject_native_uv_authority() -> None:
+    policy = EnvironmentPolicy(
+        authority="uv",
+        venv_name=".venv",
+        provenance_file=".project-source-python.json",
+        uv_invocation="python-module",
+        python_request="3.12",
+    )
+
+    with pytest.raises(
+        EnvironmentContractError,
+        match="only valid under Conda authority",
+    ):
+        uv_module_args(policy, "sync")
