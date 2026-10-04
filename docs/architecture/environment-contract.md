@@ -1,37 +1,92 @@
 # Environment Contract
 
+## Policy source
+
+`environment.toml` is the declarative environment-policy source.
+`scripts/environment.py` is the shared implementation layer that interprets
+authority, Python requests, uv discovery, `.venv` paths, and provenance rules.
+
+Two authority modes are supported:
+
+- `authority = "conda"`: the active Conda environment selects Python and uv is
+  invoked from that interpreter as `python -m uv`;
+- `authority = "uv"`: native uv resolves and manages the configured Python
+  request directly.
+
+The reusable scaffold defaults to native uv. Conda remains a first-class alternative selected through the same `environment.toml` contract.
+
 ## Authority chain
 
 ```mermaid
 flowchart TD
-    C[Active Conda environment] --> P[Python interpreter/version]
-    P --> U[Conda-local uv via python -m uv]
-    P --> V[Project .venv]
-    U --> V
+    CFG[environment.toml] --> ENV[scripts/environment.py]
+    ENV --> CLI[scripts/repo.py]
+    ENV --> BOOT[scripts/bootstrap.py]
+    ENV --> DOC[scripts/doctor.py]
+
+    C[Active Conda environment] --> CP[Conda Python]
+    CP --> CU[Conda-local uv via python -m uv]
+
+    NU[Native uv on PATH] --> UP[uv-managed Python]
+
+    CP --> V[Project .venv]
+    CU --> V
+    UP --> V
+    NU --> V
+
     V --> M[.venv/.project-source-python.json]
     V --> D[Project dependencies]
-    CLI[scripts/repo.py] --> C
-    CLI --> U
-    CLI --> V
+
     MK[Makefile - canonical] --> CLI
     SH[project.sh - Bash adapter] --> CLI
+    PS[project.ps1 - PowerShell adapter] --> CLI
+
+    CLI --> C
+    CLI --> NU
 ```
 
-## Why this model exists
+## Responsibility split
 
-The model separates three concerns that are easy to conflate:
+The model keeps three responsibilities separate:
 
-- **Conda** chooses the Python runtime.
-- **uv** resolves/installs project dependencies quickly.
-- **`.venv`** isolates the project dependency set used by normal execution and IDE tooling.
+- the configured **authority** selects the source Python;
+- **uv** resolves and installs project dependencies;
+- the project **`.venv`** isolates the runtime used by application, tests,
+  linting, and IDE tooling.
 
-A machine may have other `uv` installations. They are diagnostic context, not project authority. The Makefile and Bash adapter both delegate to the same Python dispatcher so shell choice does not create competing environment behavior.
+Conda authority is represented by active shell state, which is why the
+dispatcher may re-exec under the active Conda Python.
+
+Native uv authority is represented explicitly by the uv executable plus the
+managed interpreter it resolves. It does not require an invented active-env
+state or dispatcher re-exec.
 
 ## Provenance
 
-`make bootstrap` writes `.venv/.project-source-python.json` with the source interpreter path/version and Conda prefix. `make doctor` compares those values with the currently active Conda environment to detect a stale/mis-sourced `.venv`.
+`make bootstrap` writes `.venv/.project-source-python.json`.
 
+Conda identity records the source interpreter path/version and Conda prefix.
+Native-uv identity records the source interpreter path/version and configured uv
+Python request. New records also identify `source_authority`.
 
-## Bash support
+Legacy Conda records remain valid when their original identity fields still
+match.
 
-`project.sh` provides a Bash-native entry point for Linux/macOS, WSL, and Git Bash/MSYS2 environments. It intentionally performs only shell-safe startup work (strict mode, repository-root resolution, Python command discovery) and then delegates to `scripts/repo.py`. Bootstrap, provenance, dependency, and diagnostic rules therefore remain identical across Make and Bash entry points.
+`make doctor` and normal lifecycle commands compare the project `.venv`
+against the configured authority and fail closed on incompatible provenance.
+
+## Shell adapters
+
+`project.sh` and `project.ps1` remain intentionally thin. They perform only
+pre-Python startup checks and delegate to `scripts/repo.py`.
+
+Bootstrap, authority resolution, provenance, dependency behavior, and full
+diagnostics stay in Python so Make, Bash, and PowerShell do not acquire separate
+environment-policy implementations.
+
+See also:
+
+- `docs/architecture/bootstrap-boundary.md`
+- `docs/architecture/uv-authority.md`
+- `docs/architecture/authority-bootstrap.md`
+- `docs/architecture/authority-lifecycle.md`

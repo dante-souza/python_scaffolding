@@ -9,28 +9,39 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 from _console import PALETTE_PATH, THEME_PATH, color_enabled, kv, section, style
+from environment import (
+    IS_WINDOWS,
+    ROOT,
+    EnvironmentContractError,
+    active_authority_prefix,
+    authority_uv_path,
+    inside,
+    load_policy,
+    normalized,
+    provenance_matches,
+    read_provenance,
+    resolve_authority_python,
+    resolve_uv_managed_python,
+)
 
-ROOT = Path(__file__).resolve().parents[1]
-VENV = ROOT / ".venv"
-IS_WINDOWS = os.name == "nt"
-VENV_PYTHON = VENV / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
-META = VENV / ".project-source-python.json"
+POLICY = load_policy()
+VENV = POLICY.venv
+VENV_PYTHON = POLICY.venv_python
+META = POLICY.provenance_path
+AUTHORITY = POLICY.authority.title()
 
 
-def norm(path: str | Path) -> str:
-    return os.path.normcase(os.path.abspath(str(path)))
-
-
-def inside(path: str | Path, parent: str | Path | None) -> bool:
-    if not parent:
-        return False
-    try:
-        return os.path.commonpath([norm(path), norm(parent)]) == norm(parent)
-    except ValueError:
-        return False
+@dataclass(frozen=True)
+class AuthorityState:
+    prefix: Path | None
+    uv_executable: Path | None
+    python: Path | None
+    python_probe: dict[str, str] | None
+    resolution_error: str | None = None
 
 
 def capture(args: list[str]) -> str | None:
@@ -69,7 +80,7 @@ def all_uv_on_path() -> list[Path]:
         for name in names:
             candidate = base / name
             if candidate.is_file():
-                key = norm(candidate)
+                key = normalized(candidate)
                 if key not in seen:
                     seen.add(key)
                     found.append(candidate)
@@ -80,13 +91,6 @@ def uv_version(path: Path) -> str:
     return capture([str(path), "--version"]) or "<not available>"
 
 
-def read_meta() -> dict:
-    try:
-        return json.loads(META.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
 def read_pyproject() -> dict:
     path = ROOT / "pyproject.toml"
     try:
@@ -94,6 +98,36 @@ def read_pyproject() -> dict:
             return tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
+
+
+def inspect_authority() -> AuthorityState:
+    prefix = active_authority_prefix(POLICY)
+
+    if POLICY.authority == "conda":
+        uv = authority_uv_path(POLICY, prefix)
+        try:
+            python = resolve_authority_python(POLICY, authority_prefix=prefix)
+        except EnvironmentContractError as exc:
+            return AuthorityState(prefix, uv, None, None, str(exc))
+        return AuthorityState(prefix, uv, python, python_probe(python))
+
+    uv_raw = shutil.which("uv")
+    uv = Path(uv_raw) if uv_raw else None
+    if uv is None:
+        return AuthorityState(
+            None,
+            None,
+            None,
+            None,
+            "native uv executable is not available on PATH",
+        )
+
+    try:
+        python = resolve_uv_managed_python(POLICY, uv_executable=uv)
+    except EnvironmentContractError as exc:
+        return AuthorityState(None, uv, None, None, str(exc))
+
+    return AuthorityState(None, uv, python, python_probe(python))
 
 
 def main() -> int:
@@ -129,22 +163,31 @@ def main() -> int:
     kv("make_path", make_path or "<not found>", enabled=colors)
     kv("make_version", make_version, enabled=colors)
 
-    conda_prefix = os.environ.get("CONDA_PREFIX")
-    conda_active = bool(conda_prefix)
-    python_inside_conda = inside(sys.executable, conda_prefix)
+    state = inspect_authority()
+    conda_prefix_raw = os.environ.get("CONDA_PREFIX")
+    conda_prefix = Path(conda_prefix_raw) if conda_prefix_raw else None
+    current_inside_conda = inside(sys.executable, conda_prefix)
     py_version = sys.version.split()[0]
-
-    section("Python / Conda", enabled=colors)
-    kv("python", sys.executable, enabled=colors)
-    kv("python_version", py_version, enabled=colors)
-    kv("conda_active", conda_active, enabled=colors)
-    kv("conda_prefix", conda_prefix or "<not active>", enabled=colors)
-    kv(
-        "python_inside_conda",
-        python_inside_conda,
-        enabled=colors,
-        role="ok" if python_inside_conda else "warning",
+    authority_version = (
+        state.python_probe.get("version") if state.python_probe else None
     )
+
+    section(f"Python / {AUTHORITY} authority", enabled=colors)
+    kv("bootstrap_python", sys.executable, enabled=colors)
+    kv("bootstrap_python_version", py_version, enabled=colors)
+    kv("environment_authority", POLICY.authority, enabled=colors)
+    kv("python_request", POLICY.python_request, enabled=colors)
+    kv("authority_python", state.python or "<not resolved>", enabled=colors)
+    kv("authority_python_version", authority_version or "<not resolved>", enabled=colors)
+    kv(
+        "authority_resolution_error",
+        state.resolution_error or "<none>",
+        enabled=colors,
+        role="warning" if state.resolution_error else None,
+    )
+    kv("conda_active", bool(conda_prefix), enabled=colors)
+    kv("conda_prefix", conda_prefix or "<not active>", enabled=colors)
+    kv("bootstrap_python_inside_conda", current_inside_conda, enabled=colors)
 
     resolved_uv_raw = shutil.which("uv")
     resolved_uv = Path(resolved_uv_raw) if resolved_uv_raw else None
@@ -165,46 +208,67 @@ def main() -> int:
     section("uv executables visible on PATH", enabled=colors)
     kv("uv_path_count", len(path_uvs), enabled=colors)
     for idx, item in enumerate(path_uvs):
-        scope = "conda" if inside(item, conda_prefix) else "external"
+        if POLICY.authority == "uv" and resolved_uv and normalized(item) == normalized(resolved_uv):
+            scope = "authority"
+        elif inside(item, conda_prefix):
+            scope = "conda"
+        else:
+            scope = "external"
         kv(f"uv_path[{idx}].path", item, enabled=colors)
         kv(f"uv_path[{idx}].scope", scope, enabled=colors)
         kv(f"uv_path[{idx}].version", uv_version(item), enabled=colors)
 
-    conda_uv = None
-    if conda_prefix:
-        conda_uv = Path(conda_prefix) / ("Scripts/uv.exe" if IS_WINDOWS else "bin/uv")
-    conda_uv_exists = bool(conda_uv and conda_uv.exists())
-    try:
-        uv_pkg = importlib.metadata.version("uv")
-    except importlib.metadata.PackageNotFoundError:
-        uv_pkg = "<not installed>"
+    if POLICY.authority == "conda":
+        try:
+            uv_pkg = importlib.metadata.version("uv")
+        except importlib.metadata.PackageNotFoundError:
+            uv_pkg = "<not installed>"
+        project_uv = state.uv_executable
+        project_uv_invocation = f"{sys.executable} -m uv"
+    else:
+        uv_pkg = "<not applicable>"
+        project_uv = state.uv_executable
+        project_uv_invocation = str(project_uv) if project_uv else "<not available>"
 
-    section("Conda-local uv used by project", enabled=colors)
-    kv("conda_uv", conda_uv or "<not available>", enabled=colors)
-    kv("conda_uv_exists", conda_uv_exists, enabled=colors)
+    section(f"{AUTHORITY} uv used by project", enabled=colors)
+    kv("authority_uv", project_uv or "<not available>", enabled=colors)
+    kv("authority_uv_exists", bool(project_uv and project_uv.exists()), enabled=colors)
     kv(
-        "conda_uv_version",
-        uv_version(conda_uv) if conda_uv_exists else "<not available>",
+        "authority_uv_version",
+        uv_version(project_uv) if project_uv and project_uv.exists() else "<not available>",
         enabled=colors,
     )
-    kv("conda_uv_package_version", uv_pkg, enabled=colors)
-    kv("project_uv_invocation", f"{sys.executable} -m uv", enabled=colors)
+    kv("authority_uv_package_version", uv_pkg, enabled=colors)
+    kv("project_uv_invocation", project_uv_invocation, enabled=colors)
 
     venv_probe = python_probe(VENV_PYTHON)
-    meta = read_meta()
+    meta = read_provenance(POLICY)
     meta_source = meta.get("source_python", "<not recorded>")
     meta_version = meta.get("source_python_version", "<not recorded>")
+    meta_authority = meta.get("source_authority", "<legacy conda>")
     meta_conda = meta.get("source_conda_prefix", "<not recorded>")
-    source_matches = (
-        bool(meta and norm(meta_source) == norm(sys.executable))
-        if meta_source != "<not recorded>"
-        else False
+    meta_uv_request = meta.get("source_uv_request", "<not recorded>")
+
+    source_matches = False
+    if meta and state.python and authority_version:
+        source_matches = provenance_matches(
+            POLICY,
+            meta,
+            python_executable=state.python,
+            python_version=authority_version,
+            authority_prefix=state.prefix,
+        )
+
+    version_matches = bool(
+        venv_probe
+        and authority_version
+        and venv_probe.get("version") == authority_version
     )
-    version_matches = bool(venv_probe and venv_probe.get("version") == py_version)
-    base_prefix_matches = (
-        bool(venv_probe and norm(venv_probe.get("base_prefix", "")) == norm(conda_prefix))
-        if conda_prefix
-        else False
+    base_prefix_matches = bool(
+        venv_probe
+        and state.python_probe
+        and normalized(venv_probe.get("base_prefix", ""))
+        == normalized(state.python_probe.get("prefix", ""))
     )
 
     section("Project .venv", enabled=colors)
@@ -223,12 +287,14 @@ def main() -> int:
     )
     kv("venv_source_metadata", META, enabled=colors)
     kv("venv_source_metadata_exists", META.exists(), enabled=colors)
+    kv("venv_source_authority", meta_authority, enabled=colors)
     kv("venv_source_python", meta_source, enabled=colors)
     kv("venv_source_python_version", meta_version, enabled=colors)
     kv("venv_source_conda_prefix", meta_conda, enabled=colors)
-    kv("venv_source_matches_active_conda", source_matches, enabled=colors)
-    kv("venv_python_version_matches_conda", version_matches, enabled=colors)
-    kv("venv_base_prefix_matches_conda", base_prefix_matches, enabled=colors)
+    kv("venv_source_uv_request", meta_uv_request, enabled=colors)
+    kv("venv_source_matches_authority", source_matches, enabled=colors)
+    kv("venv_python_version_matches_authority", version_matches, enabled=colors)
+    kv("venv_base_prefix_matches_authority", base_prefix_matches, enabled=colors)
 
     pyproject = read_pyproject()
     requires_python = pyproject.get("project", {}).get("requires-python")
@@ -236,18 +302,14 @@ def main() -> int:
     section("Repository Python policy", enabled=colors)
     kv("python_version_file", version_file, enabled=colors)
     kv("requires_python_declared", bool(requires_python), enabled=colors)
-    kv("python_authority", "conda", enabled=colors, role="ok")
+    kv("requires_python", requires_python or "<missing>", enabled=colors)
+    kv("python_authority", POLICY.authority, enabled=colors, role="ok")
+    kv("configured_python_request", POLICY.python_request, enabled=colors)
 
-    major_minor = ".".join(py_version.split(".")[:2])
-    section("uv Python resolution", enabled=colors)
-    kv(
-        "uv_requires_python_source",
-        "pyproject" if requires_python else "interpreter_fallback",
-        enabled=colors,
-    )
-    kv("uv_effective_requires_python", requires_python or f">={major_minor}", enabled=colors)
-    kv("uv_resolution_python", sys.executable, enabled=colors)
-    kv("uv_resolution_python_version", py_version, enabled=colors)
+    section("Authority Python resolution", enabled=colors)
+    kv("authority_request", POLICY.python_request, enabled=colors)
+    kv("authority_python", state.python or "<not resolved>", enabled=colors)
+    kv("authority_python_version", authority_version or "<not resolved>", enabled=colors)
 
     section("Doctor console", enabled=colors)
     kv("color_enabled", colors, enabled=colors)
@@ -258,26 +320,36 @@ def main() -> int:
     warnings: list[str] = []
     bootstrap: list[str] = []
 
-    if not conda_active:
-        errors.append("No active Conda environment")
-    elif not python_inside_conda:
-        errors.append("Current Python is outside the active Conda environment")
+    if POLICY.authority == "conda":
+        if state.prefix is None:
+            errors.append("No active Conda environment")
+        elif not inside(sys.executable, state.prefix):
+            errors.append("Current Python is outside the active Conda environment")
+        if state.resolution_error:
+            errors.append(state.resolution_error)
+        if state.uv_executable is None or not state.uv_executable.exists():
+            bootstrap.append("Conda-local uv is not installed yet")
+    else:
+        if state.uv_executable is None:
+            errors.append("Native uv executable is not available on PATH")
+        elif state.python is None:
+            detail = state.resolution_error or "managed Python is not resolved"
+            bootstrap.append(
+                f"uv-managed Python {POLICY.python_request!r} is not ready: {detail}"
+            )
 
     if version_file:
-        errors.append(".python-version exists, but Conda must be the sole Python authority")
-    if requires_python:
         errors.append(
-            "pyproject.toml declares requires-python; this template delegates "
-            "Python selection to Conda"
+            ".python-version exists, but environment.toml defines the Python authority"
         )
+    if not requires_python:
+        errors.append("pyproject.toml does not declare requires-python compatibility")
 
     if not bash_adapter.is_file():
         errors.append("Bash adapter project.sh is missing")
     elif not IS_WINDOWS and not os.access(bash_adapter, os.X_OK):
         warnings.append("project.sh exists but is not executable; run: chmod +x project.sh")
 
-    if conda_active and not conda_uv_exists:
-        bootstrap.append("Conda-local uv is not installed yet")
     if not VENV.exists():
         bootstrap.append("project .venv does not exist yet")
     elif not VENV_PYTHON.exists():
@@ -285,17 +357,27 @@ def main() -> int:
     else:
         if not META.exists():
             warnings.append(".venv provenance metadata is missing")
-        elif not source_matches:
-            warnings.append(".venv provenance does not match the active Conda Python")
-        if not version_matches:
-            warnings.append(".venv Python version differs from active Conda Python")
-        if conda_prefix and not base_prefix_matches:
-            warnings.append(".venv base_prefix differs from the active Conda prefix")
+        elif state.python and authority_version and not source_matches:
+            warnings.append(
+                f".venv provenance does not match configured {AUTHORITY} authority"
+            )
+        if authority_version and not version_matches:
+            warnings.append(
+                f".venv Python version differs from configured {AUTHORITY} authority"
+            )
+        if state.python_probe and not base_prefix_matches:
+            warnings.append(
+                f".venv base_prefix differs from configured {AUTHORITY} Python"
+            )
 
-    if resolved_uv and not inside(resolved_uv, conda_prefix):
+    if (
+        POLICY.authority == "conda"
+        and resolved_uv
+        and not inside(resolved_uv, state.prefix)
+    ):
         warnings.append(
             "the shell resolves 'uv' to an external installation; "
-            "project targets intentionally use 'python -m uv'"
+            "Conda-authority targets intentionally use 'python -m uv'"
         )
 
     section("Assessment", enabled=colors)

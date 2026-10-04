@@ -1,40 +1,42 @@
 # Python Project Base
 
-Reusable repository scaffold for Python projects with a **Makefile-first workflow**, a **Bash command adapter**, **Conda-owned Python selection**, **Conda-local `uv`**, explicit `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer.
+Reusable repository scaffold for Python projects with a **Makefile-first workflow**, **Bash and PowerShell command adapters**, an explicit environment-policy contract, `.venv` provenance, colorful environment diagnostics, and a shared agent/skill layer. The canonical policy lives in `environment.toml`; both native `uv` and Conda are supported Python authorities, with native `uv` as the default.
 
-The template is intentionally opinionated about **workflow**, not about the Python version: there is no `.python-version` and no `requires-python` declaration. The active Conda environment is the authority.
+The template is intentionally opinionated about **workflow** and explicit about compatibility: `requires-python = ">=3.11"` records the runtime floor required by the scaffold, while `environment.toml` selects the exact Python authority. There is no `.python-version` pin.
 
 ## Core contract
 
 ```text
-Conda environment
-  └── chooses Python interpreter/version
-          │
-          ▼
- active Python
-  ├── installs/updates uv inside Conda
-  ├── invokes uv as: python -m uv
-  └── creates project .venv from this exact interpreter
-          │
-          ▼
- project .venv
-  ├── receives project dependencies
-  └── records source interpreter provenance
-          │
-          ▼
- Python command dispatcher
-  ├── Makefile      ← canonical human-facing interface
-  └── project.sh    ← Bash adapter
+                 environment.toml
+                  /            \
+                 /              \
+       authority = uv      authority = conda
+              |                   |
+      native uv on PATH      active Conda env
+              |                   |
+      uv-managed Python       Conda Python
+               \                 /
+                \               /
+                 project .venv
+                 |            |
+        project dependencies  provenance
+                 |
+          scripts/repo.py
+          /      |       \
+     Makefile project.sh project.ps1
 ```
 
-A shell-global `uv` may exist and may even win normal `PATH` resolution. That is observable, but project targets deliberately avoid depending on it.
+The public Makefile contract is identical in both modes. Conda mode deliberately uses authority-local `python -m uv`; native-uv mode invokes the resolved `uv` executable and managed Python directly.
 
 ## First use
 
-1. Create/activate the Conda environment you want to own the project's Python version.
-2. Run `make doctor`.
-3. Run `make setup`.
-4. Run `make check`.
+The default policy is `authority = "uv"`. Ensure `uv` is available on `PATH`, then:
+
+1. Run `make doctor`.
+2. Run `make setup`.
+3. Run `make check`.
+
+For Conda-controlled Python selection, change `environment.authority` to `"conda"`, activate the intended Conda environment, and use the same Make targets.
 
 Typical lifecycle:
 
@@ -46,7 +48,9 @@ make lint
 make check
 ```
 
-From Bash, the equivalent adapter is available:
+Shell-native adapters expose the same command vocabulary.
+
+From Bash:
 
 ```bash
 ./project.sh doctor
@@ -56,9 +60,23 @@ From Bash, the equivalent adapter is available:
 ./project.sh check
 ```
 
-This includes Linux/macOS Bash, WSL, and Git Bash/MSYS2 on Windows when their normal Conda activation is available. The Bash adapter delegates to the same Python command dispatcher as Make, so it does not maintain a second implementation of project behavior.
+This includes Linux/macOS Bash, WSL, and Git Bash/MSYS2 on Windows; Conda activation is required only when the configured authority is `conda`.
 
-Use `make help` or `./project.sh help` for the complete command list.
+From PowerShell:
+
+```powershell
+.\project.ps1 doctor
+.\project.ps1 setup
+.\project.ps1 test
+.\project.ps1 lint
+.\project.ps1 check
+```
+
+Both adapters delegate to the same Python command dispatcher as Make, so neither maintains a second implementation of project behavior.
+
+If Python cannot be resolved or started, the shell adapter prints minimal pre-Python diagnostics before stopping. Exit code `127` means Python was not found; `126` means it was found but could not be started. WSL requires a Python executable runnable inside WSL rather than a Windows/Cygwin interpreter inherited through `PATH`.
+
+Use `make help`, `./project.sh help`, or `.\project.ps1 help` for the complete command list.
 
 ## Environment observability
 
@@ -66,10 +84,10 @@ Use `make help` or `./project.sh help` for the complete command list.
 
 - host platform, shell environment, Bash availability/version, GNU Make availability/version, and the Bash adapter path;
 - active Python and version;
-- Conda activation/prefix and whether Python is actually inside it;
-- the `uv` selected by shell `PATH`;
-- every visible `uv` executable found on `PATH`;
-- the Conda-local `uv` used by the project;
+- configured authority and requested Python version;
+- Conda activation/prefix when relevant;
+- the `uv` selected by shell `PATH` and every visible `uv` executable;
+- the resolved authority Python and authority-specific `uv` invocation used by the project;
 - `.venv` existence, Python version, base prefix and provenance metadata;
 - repository Python policy (`.python-version`, `requires-python`, authority);
 - effective Python resolution policy used for `uv`;
@@ -99,12 +117,15 @@ make doctor-force-color
 ├── README.md
 ├── Makefile
 ├── project.sh
+├── project.ps1
 ├── pyproject.toml
+├── environment.toml
 ├── config/
 │   ├── console-colors.json
 │   └── doctor-theme.json
 ├── scripts/
 │   ├── _console.py
+│   ├── environment.py
 │   ├── bootstrap.py
 │   ├── doctor.py
 │   ├── repo.py
@@ -119,6 +140,7 @@ make doctor-force-color
 │   └── reference/
 ├── docs/
 │   ├── architecture/
+│   │   └── bootstrap-boundary.md
 │   └── adr/
 ├── ai/
 │   ├── agents/
@@ -133,7 +155,7 @@ make doctor-force-color
 
 ## Command interface policy
 
-The Makefile is the canonical human-facing interface. `project.sh` is a supported Bash adapter exposing the same command names for environments where a shell-native entry point is useful. Both are intentionally thin and delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code.
+The Makefile is the canonical human-facing interface. `project.sh` and `project.ps1` are supported Bash and PowerShell adapters exposing the same command names where a shell-native entry point is useful. All three entry points delegate to `scripts/repo.py`; environment/bootstrap logic is not duplicated in shell code. Conda mode may hand execution to the active Conda interpreter before policy-sensitive work; native-uv mode resolves its managed interpreter explicitly without inventing an active-environment concept. `environment.toml` declares environment policy, and `scripts/environment.py` is the single implementation layer that interprets it.
 
 For humans and coding agents, recurring repository operations belong behind the stable project command surface. Direct tool commands are implementation details unless debugging the command layer itself.
 
@@ -142,10 +164,10 @@ Important targets:
 | Target | Purpose |
 |---|---|
 | `make doctor` | Inspect environment state and policy. |
-| `make bootstrap` | Install/update Conda-local `uv`; create `.venv`; write provenance. |
+| `make bootstrap` | Prepare the configured Python authority; create `.venv`; write provenance. |
 | `make sync` | Synchronize dependencies into `.venv`. |
 | `make setup` | Bootstrap, sync and diagnose. |
-| `make env-rebuild` | Recreate `.venv` from the currently active Conda Python. |
+| `make env-rebuild` | Recreate `.venv` from the configured authority Python. |
 | `make lock` | Refresh `uv.lock`. |
 | `make test` | Run tests. |
 | `make lint` | Run static checks. |
@@ -153,7 +175,7 @@ Important targets:
 | `make check` | Run quality gates plus agent/skill validation. |
 | `make agents-check` | Validate AI policy scaffold. |
 
-Every target above can also be called from Bash as `./project.sh <command>`, for example `./project.sh doctor` or `./project.sh env-rebuild`.
+Every target above can also be called through a shell adapter: Bash uses `./project.sh <command>` and PowerShell uses `.\project.ps1 <command>`.
 
 ## Python source vs notebooks
 
@@ -198,3 +220,8 @@ At minimum, replace:
 - this README title/description.
 
 Keep the environment contract unless the new repository intentionally adopts a different Python authority model.
+
+
+## License
+
+This repository is licensed under the GNU Affero General Public License v3.0. See `LICENSE`.

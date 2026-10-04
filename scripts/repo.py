@@ -1,25 +1,41 @@
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-VENV = ROOT / ".venv"
-IS_WINDOWS = os.name == "nt"
-VENV_PYTHON = VENV / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
+from environment import (
+    IS_WINDOWS,
+    ROOT,
+    EnvironmentContractError,
+    authority_handoff_target,
+    inside,
+    load_policy,
+    provenance_matches,
+    python_executable_version,
+    read_provenance,
+    require_active_authority,
+    require_native_uv,
+    resolve_uv_managed_python,
+    uv_module_args,
+)
+
+POLICY = load_policy()
+VENV = POLICY.venv
+VENV_PYTHON = POLICY.venv_python
+AUTHORITY = POLICY.authority.title()
 
 TARGETS = {
-    "doctor": "Inspect shell/Python/Conda/uv/.venv state and repository policy.",
+    "doctor": f"Inspect shell/Python/{AUTHORITY}/uv/.venv state and repository policy.",
     "doctor-no-color": "Run environment diagnostics without ANSI colors.",
     "doctor-force-color": "Force ANSI colors in environment diagnostics.",
-    "bootstrap": "Install/update uv inside active Conda and create .venv from its Python.",
-    "sync": "Synchronize project dependencies into .venv using Conda-local uv.",
+    "bootstrap": f"Prepare the configured {AUTHORITY} Python authority and project .venv.",
+    "sync": "Synchronize project dependencies into .venv through configured uv authority.",
     "setup": "bootstrap + sync + doctor.",
-    "env-rebuild": "Delete .venv and recreate it from the active Conda Python.",
-    "lock": "Refresh uv.lock under the active Conda Python policy.",
+    "env-rebuild": f"Delete .venv and recreate it from configured {AUTHORITY} authority.",
+    "lock": f"Refresh uv.lock under configured {AUTHORITY} Python policy.",
     "test": "Run pytest.",
     "lint": "Run Ruff checks.",
     "format": "Format source/tests/scripts with Ruff.",
@@ -30,6 +46,14 @@ TARGETS = {
     "agents-check": "Validate agent/skill scaffold and required policy files.",
     "clean": "Remove generated caches/build artifacts (not .venv).",
 }
+
+
+@dataclass(frozen=True)
+class AuthorityRuntime:
+    python: Path
+    python_version: str
+    prefix: Path | None = None
+    uv_executable: Path | None = None
 
 
 def run(args: list[str], *, executable: Path | None = None) -> None:
@@ -43,29 +67,101 @@ def run_script(name: str, *args: str) -> None:
     run([str(ROOT / "scripts" / name), *args], executable=Path(sys.executable))
 
 
-def require_conda() -> None:
-    prefix = os.environ.get("CONDA_PREFIX")
-    if not prefix:
-        raise SystemExit("ERROR: activate the intended Conda environment first.")
+def handoff_to_authority() -> int | None:
+    # Conda authority is active shell state, so policy-sensitive commands must
+    # execute under that environment's interpreter. Native uv authority is
+    # explicit instead: consumers resolve and pass its managed Python directly.
+    if POLICY.authority == "uv":
+        return None
+
+    target = authority_handoff_target(POLICY)
+    if target is None:
+        return None
+
+    completed = subprocess.run(
+        [str(target), str(ROOT / "scripts" / "repo.py"), *sys.argv[1:]],
+        cwd=ROOT,
+        check=False,
+    )
+    return completed.returncode
+
+
+def require_authority() -> AuthorityRuntime:
     try:
-        common = os.path.commonpath([os.path.abspath(sys.executable), os.path.abspath(prefix)])
-    except ValueError:
-        common = ""
-    if os.path.normcase(common) != os.path.normcase(os.path.abspath(prefix)):
-        raise SystemExit("ERROR: current Python is not inside the active Conda environment.")
+        if POLICY.authority == "conda":
+            prefix = require_active_authority(POLICY)
+            return AuthorityRuntime(
+                python=Path(sys.executable),
+                python_version=sys.version.split()[0],
+                prefix=prefix,
+            )
+
+        uv = require_native_uv(POLICY)
+        python = resolve_uv_managed_python(POLICY, uv_executable=uv)
+        return AuthorityRuntime(
+            python=python,
+            python_version=python_executable_version(python),
+            uv_executable=uv,
+        )
+    except EnvironmentContractError as exc:
+        raise SystemExit(f"ERROR: {exc}.") from None
+
+
+def run_uv(runtime: AuthorityRuntime, *args: str) -> None:
+    if POLICY.authority == "conda":
+        run(
+            uv_module_args(POLICY, *args),
+            executable=runtime.python,
+        )
+        return
+
+    if runtime.uv_executable is None:
+        raise SystemExit("ERROR: native uv authority has no resolved uv executable.")
+
+    run(list(args), executable=runtime.uv_executable)
 
 
 def require_venv() -> None:
     if not VENV_PYTHON.exists():
-        raise SystemExit("ERROR: project .venv is missing. Run: make setup (or ./project.sh setup)")
+        raise SystemExit(
+            "ERROR: project .venv is missing. Run: make setup "
+            "(or ./project.sh setup / .\\project.ps1 setup)"
+        )
+
+
+def require_venv_provenance() -> AuthorityRuntime:
+    runtime = require_authority()
+    require_venv()
+    metadata = read_provenance(POLICY)
+    if not metadata:
+        raise SystemExit(
+            "ERROR: project .venv provenance is missing or invalid. Run: make env-rebuild"
+        )
+    if not provenance_matches(
+        POLICY,
+        metadata,
+        python_executable=runtime.python,
+        python_version=runtime.python_version,
+        authority_prefix=runtime.prefix,
+    ):
+        raise SystemExit(
+            "ERROR: project .venv provenance does not match "
+            f"the configured {AUTHORITY} Python authority. Run: make env-rebuild"
+        )
+    return runtime
 
 
 def cmd_help() -> None:
-    print("Project commands (Makefile is canonical; ./project.sh is the Bash adapter):\n")
+    print(
+        "Project commands "
+        "(Makefile is canonical; project.sh and project.ps1 are shell adapters):\n"
+    )
     width = max(map(len, TARGETS))
     for name, description in TARGETS.items():
         print(f"  make {name:<{width}}  {description}")
-    print("\nBash equivalent: ./project.sh <command>")
+    print("\nShell adapters:")
+    print("  Bash:       ./project.sh <command>")
+    print(r"  PowerShell: .\project.ps1 <command>")
 
 
 def cmd_doctor() -> None:
@@ -85,14 +181,13 @@ def cmd_bootstrap() -> None:
 
 
 def cmd_sync() -> None:
-    require_conda()
-    require_venv()
-    run(["-m", "uv", "sync", "--python", str(VENV_PYTHON)], executable=Path(sys.executable))
+    runtime = require_venv_provenance()
+    run_uv(runtime, "sync", "--python", str(VENV_PYTHON))
 
 
 def cmd_lock() -> None:
-    require_conda()
-    run(["-m", "uv", "lock", "--python", sys.executable], executable=Path(sys.executable))
+    runtime = require_authority()
+    run_uv(runtime, "lock", "--python", str(runtime.python))
 
 
 def cmd_setup() -> None:
@@ -102,7 +197,21 @@ def cmd_setup() -> None:
 
 
 def cmd_env_rebuild() -> None:
-    require_conda()
+    if IS_WINDOWS and inside(sys.executable, VENV):
+        raise SystemExit(
+            "ERROR: Windows env-rebuild cannot delete the project .venv while "
+            "running from its Python. Use: make env-rebuild "
+            "(or .\\project.ps1 env-rebuild)"
+        )
+
+    if POLICY.authority == "conda":
+        require_authority()
+    else:
+        try:
+            require_native_uv(POLICY)
+        except EnvironmentContractError as exc:
+            raise SystemExit(f"ERROR: {exc}.") from None
+
     if VENV.exists():
         print(f"Removing {VENV}")
         shutil.rmtree(VENV)
@@ -112,17 +221,17 @@ def cmd_env_rebuild() -> None:
 
 
 def cmd_test() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "pytest"], executable=VENV_PYTHON)
 
 
 def cmd_lint() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "ruff", "check", "src", "tests", "scripts"], executable=VENV_PYTHON)
 
 
 def cmd_format() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "ruff", "format", "src", "tests", "scripts"], executable=VENV_PYTHON)
     run(["-m", "ruff", "check", "--fix", "src", "tests", "scripts"], executable=VENV_PYTHON)
 
@@ -146,7 +255,7 @@ def cmd_check() -> None:
 
 
 def cmd_run() -> None:
-    require_venv()
+    require_venv_provenance()
     run(["-m", "project_name"], executable=VENV_PYTHON)
 
 
@@ -154,14 +263,24 @@ def cmd_clean() -> None:
     dirs = [".pytest_cache", ".ruff_cache", "build", "dist", "htmlcov"]
     for rel in dirs:
         p = ROOT / rel
-        if p.exists():
+        if p.is_dir() and not p.is_symlink():
             print(f"Removing {p}")
             shutil.rmtree(p)
-    for p in ROOT.rglob("__pycache__"):
-        shutil.rmtree(p, ignore_errors=True)
-    for p in ROOT.rglob("*.egg-info"):
-        if p.is_dir():
-            shutil.rmtree(p, ignore_errors=True)
+        elif p.exists() or p.is_symlink():
+            print(f"Removing {p}")
+            p.unlink()
+
+    # Never recurse through the whole repository: doing so reaches .venv and can
+    # delete interpreter/package caches that belong to the managed environment.
+    for base in (ROOT / "src", ROOT / "tests", ROOT / "scripts"):
+        if not base.exists():
+            continue
+        for p in base.rglob("__pycache__"):
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p, ignore_errors=True)
+        for p in base.rglob("*.egg-info"):
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p, ignore_errors=True)
 
 
 def main() -> int:
@@ -177,6 +296,12 @@ def main() -> int:
         print(f"Unknown command: {sys.argv[1]}")
         cmd_help()
         return 2
+
+    if command != "help":
+        handed_off = handoff_to_authority()
+        if handed_off is not None:
+            return handed_off
+
     try:
         fn()
     except subprocess.CalledProcessError as exc:

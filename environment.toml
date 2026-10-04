@@ -1,0 +1,15 @@
+# Canonical environment-policy configuration.
+# Native uv is the default Python authority for the reusable scaffold.
+# Projects that need Conda-controlled interpreter selection can switch
+# environment.authority to "conda" without changing the Makefile contract.
+
+[environment]
+authority = "uv"
+venv = ".venv"
+provenance_file = ".project-source-python.json"
+
+[python]
+request = "3.12"
+
+[uv]
+invocation = "python-module"

@@ -1,16 +1,38 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-VENV = ROOT / ".venv"
-META = VENV / ".project-source-python.json"
-IS_WINDOWS = os.name == "nt"
-VENV_PYTHON = VENV / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
+from environment import (
+    ROOT,
+    EnvironmentContractError,
+    load_policy,
+    provenance_matches,
+    provenance_record,
+    python_executable_version,
+    read_provenance,
+    require_active_authority,
+    require_native_uv,
+    resolve_uv_managed_python,
+    uv_module_args,
+    uv_python_install_args,
+)
+
+POLICY = load_policy()
+VENV = POLICY.venv
+VENV_PYTHON = POLICY.venv_python
+META = POLICY.provenance_path
+
+
+@dataclass(frozen=True)
+class BootstrapAuthority:
+    python: Path
+    python_version: str
+    authority_prefix: Path | None = None
+    uv_executable: Path | None = None
 
 
 def run(*args: str) -> None:
@@ -18,82 +40,134 @@ def run(*args: str) -> None:
     subprocess.run(args, cwd=ROOT, check=True)
 
 
-def normalized(path: str | Path) -> str:
-    return os.path.normcase(os.path.abspath(str(path)))
+def prepare_authority() -> BootstrapAuthority:
+    if POLICY.authority == "conda":
+        authority_prefix = require_active_authority(POLICY)
+        authority_python = Path(sys.executable)
+
+        # Conda owns Python, so uv stays local to that authority environment.
+        run(sys.executable, "-m", "pip", "install", "--upgrade", "uv")
+        run(sys.executable, *uv_module_args(POLICY, "--version"))
+
+        return BootstrapAuthority(
+            python=authority_python,
+            python_version=sys.version.split()[0],
+            authority_prefix=authority_prefix,
+        )
+
+    uv = require_native_uv(POLICY)
+    run(str(uv), "--version")
+
+    # Bootstrap is the only Phase 4C boundary allowed to install managed Python.
+    run(str(uv), *uv_python_install_args(POLICY))
+    authority_python = resolve_uv_managed_python(POLICY, uv_executable=uv)
+    authority_version = python_executable_version(authority_python)
+
+    return BootstrapAuthority(
+        python=authority_python,
+        python_version=authority_version,
+        uv_executable=uv,
+    )
 
 
-def inside(path: str | Path, parent: str | Path) -> bool:
-    try:
-        return os.path.commonpath([normalized(path), normalized(parent)]) == normalized(parent)
-    except ValueError:
-        return False
+def create_venv(authority: BootstrapAuthority) -> None:
+    if POLICY.authority == "conda":
+        run(
+            str(authority.python),
+            *uv_module_args(
+                POLICY,
+                "venv",
+                str(VENV),
+                "--python",
+                str(authority.python),
+            ),
+        )
+        return
+
+    if authority.uv_executable is None:
+        raise EnvironmentContractError(
+            "native uv bootstrap is missing its uv executable"
+        )
+
+    run(
+        str(authority.uv_executable),
+        "venv",
+        str(VENV),
+        "--python",
+        str(authority.python),
+    )
 
 
-def read_metadata() -> dict:
-    try:
-        return json.loads(META.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+def provenance_matches_authority(
+    metadata: dict,
+    authority: BootstrapAuthority,
+) -> bool:
+    return provenance_matches(
+        POLICY,
+        metadata,
+        python_executable=authority.python,
+        python_version=authority.python_version,
+        authority_prefix=authority.authority_prefix,
+    )
 
 
-def metadata_matches_active_conda(metadata: dict, conda_prefix: str) -> bool:
-    source_python = metadata.get("source_python")
-    source_version = metadata.get("source_python_version")
-    source_conda = metadata.get("source_conda_prefix")
-    return bool(
-        source_python
-        and source_version
-        and source_conda
-        and normalized(source_python) == normalized(sys.executable)
-        and source_version == sys.version.split()[0]
-        and normalized(source_conda) == normalized(conda_prefix)
+def build_provenance(authority: BootstrapAuthority) -> dict[str, str]:
+    return provenance_record(
+        POLICY,
+        created_by="make bootstrap",
+        python_executable=authority.python,
+        python_version=authority.python_version,
+        authority_prefix=authority.authority_prefix,
+        uv_executable=authority.uv_executable,
     )
 
 
 def main() -> int:
-    conda_prefix = os.environ.get("CONDA_PREFIX")
-    if not conda_prefix:
-        print("ERROR: no active Conda environment.")
-        print("Activate the intended Conda environment, then run: make bootstrap")
+    try:
+        authority = prepare_authority()
+    except EnvironmentContractError as exc:
+        print(f"ERROR: {exc}.")
+        if POLICY.authority == "conda":
+            print("Activate the intended Conda environment, then run: make bootstrap")
+        else:
+            print("Install native uv on PATH, then run: make bootstrap")
         return 2
 
-    if not inside(sys.executable, conda_prefix):
-        print("ERROR: current Python is not inside CONDA_PREFIX.")
-        print(f"python={sys.executable}")
-        print(f"CONDA_PREFIX={conda_prefix}")
-        return 2
-
-    print(f"Conda Python authority: {sys.executable}")
-    print(f"Python version: {sys.version.split()[0]}")
-
-    # uv belongs to the active Conda environment, never to an unrelated PATH install.
-    run(sys.executable, "-m", "pip", "install", "--upgrade", "uv")
-    run(sys.executable, "-m", "uv", "--version")
+    print(f"{POLICY.authority.title()} Python authority: {authority.python}")
+    print(f"Python version: {authority.python_version}")
 
     if VENV.exists():
         if not VENV_PYTHON.exists():
-            print("ERROR: .venv exists but its Python executable is missing.")
+            print(f"ERROR: {VENV.name} exists but its Python executable is missing.")
             print("Run: make env-rebuild")
             return 3
-        metadata = read_metadata()
+
+        metadata = read_provenance(POLICY)
         if not metadata:
-            print("ERROR: .venv exists without trustworthy source metadata.")
+            print(f"ERROR: {VENV.name} exists without trustworthy source metadata.")
             print("Run: make env-rebuild")
             return 3
-        if not metadata_matches_active_conda(metadata, conda_prefix):
-            print("ERROR: .venv provenance does not match the active Conda Python.")
+
+        if not provenance_matches_authority(metadata, authority):
+            print(
+                "ERROR: project .venv provenance does not match "
+                f"the configured {POLICY.authority.title()} Python authority."
+            )
             print("Run: make env-rebuild")
             return 3
-        print("Existing .venv provenance matches the active Conda environment.")
+
+        print(
+            "Existing .venv provenance matches "
+            f"the configured {POLICY.authority.title()} authority."
+        )
     else:
-        run(sys.executable, "-m", "uv", "venv", str(VENV), "--python", sys.executable)
-        metadata = {
-            "source_python": str(Path(sys.executable).resolve()),
-            "source_python_version": sys.version.split()[0],
-            "source_conda_prefix": str(Path(conda_prefix).resolve()),
-            "created_by": "make bootstrap",
-            "uv_invocation": f"{sys.executable} -m uv",
-        }
+        try:
+            create_venv(authority)
+            metadata = build_provenance(authority)
+        except EnvironmentContractError as exc:
+            print(f"ERROR: {exc}.")
+            return 4
+
         META.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
     if not VENV_PYTHON.exists():

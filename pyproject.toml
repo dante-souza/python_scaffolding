@@ -7,12 +7,13 @@ name = "project-template"
 version = "0.1.0"
 description = "Reusable Makefile-first Python project template."
 readme = "README.md"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [{ name = "Project Author" }]
+requires-python = ">=3.11"
 dependencies = []
 
-# Deliberately NO requires-python.
-# Repository policy: the active Conda environment is the Python authority.
+# requires-python declares compatibility. environment.toml independently selects
+# the exact Python authority/runtime policy used by project automation.
 
 [dependency-groups]
 dev = [
