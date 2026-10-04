@@ -1,0 +1,73 @@
+name: Publish semantic releases
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout validated main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Publish historical and stable releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TARGET: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v1.0.0 already exists; release publication is complete."
+            exit 0
+          fi
+
+          create_release() {
+            local tag="$1"
+            local target="$2"
+            local title="$3"
+            local notes="$4"
+
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "$tag already exists; preserving it."
+              return
+            fi
+
+            gh release create "$tag"               --repo "$GITHUB_REPOSITORY"               --target "$target"               --title "$title"               --notes-file "$notes"
+          }
+
+          create_release             v0.1.0             046632da7d05ec5e1bf6c16c86c415d6576f75d6             "v0.1.0 — Phase 0: Repair current invariants"             docs/releases/v0.1.0-phase-0.md
+
+          create_release             v0.2.0             a744e5d53e129bfd9e6de7c5952ba9834cd3e175             "v0.2.0 — Phase 1: Extract environment architecture"             docs/releases/v0.2.0-phase-1.md
+
+          create_release             v0.3.0             a51535486c16b66b9912ecbf1f9a42448e276135             "v0.3.0 — Phase 2: Bootstrap boundaries"             docs/releases/v0.3.0-phase-2.md
+
+          create_release             v0.4.0             5b4acf822fa5bf26a66cc33dc4dca22bcbe0bdab             "v0.4.0 — Phase 3: Scaffold testing and cross-platform CI"             docs/releases/v0.4.0-phase-3.md
+
+          create_release             v0.5.0             5ce2357a5dc2c69a8f96b89c3aa72fb566b5bd82             "v0.5.0 — Phase 4: Dual Python authority"             docs/releases/v0.5.0-phase-4.md
+
+          create_release             v0.5.1             0d9e5915d8f88124addbc0fe073666a9e99e8ae4             "v0.5.1 — Windows env-rebuild hotfix"             docs/releases/v0.5.1-hotfix.md
+
+          create_release             v1.0.0             "$RELEASE_TARGET"             "v1.0.0 — First stable Python Scaffolding baseline"             docs/releases/v1.0.0.md
+
+          gh release upload v1.0.0             docs/releases/v1.0.0-full-report.md#python-scaffolding-v1.0.0-full-report.md             --repo "$GITHUB_REPOSITORY"
+
+          gh release edit v1.0.0             --repo "$GITHUB_REPOSITORY"             --latest
