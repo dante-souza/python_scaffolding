@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Publish historical and stable releases
+      - name: Publish and synchronize semantic releases
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TARGET: ${{ github.event.workflow_run.head_sha }}
@@ -35,10 +35,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "v1.0.0 already exists; release publication is complete."
-            exit 0
-          fi
+          release_exists() {
+            gh release view "$1" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          }
+
+          asset_exists() {
+            local tag="$1"
+            local asset="$2"
+
+            release_exists "$tag" &&
+              gh release view "$tag"                 --repo "$GITHUB_REPOSITORY"                 --json assets                 --jq '.assets[].name' |
+              grep -Fxq "$asset"
+          }
 
           create_release() {
             local tag="$1"
@@ -46,13 +54,52 @@ jobs:
             local title="$3"
             local notes="$4"
 
-            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "$tag already exists; preserving it."
+            if release_exists "$tag"; then
+              echo "$tag already exists; preserving tag/target."
               return
             fi
 
             gh release create "$tag"               --repo "$GITHUB_REPOSITORY"               --target "$target"               --title "$title"               --notes-file "$notes"
           }
+
+          sync_release() {
+            local tag="$1"
+            local title="$2"
+            local notes="$3"
+            local report="$4"
+            local label="$5"
+            local asset_name
+            asset_name="$(basename "$report")"
+
+            gh release edit "$tag"               --repo "$GITHUB_REPOSITORY"               --title "$title"               --notes-file "$notes"
+
+            if asset_exists "$tag" "$asset_name"; then
+              echo "$tag already has $asset_name; preserving asset."
+            else
+              gh release upload "$tag"                 "$report#$label"                 --repo "$GITHUB_REPOSITORY"
+            fi
+          }
+
+          all_reports_present=true
+          while IFS='|' read -r tag asset; do
+            if ! asset_exists "$tag" "$asset"; then
+              all_reports_present=false
+              break
+            fi
+          done <<'EOF'
+          v0.1.0|v0.1.0-full-report.md
+          v0.2.0|v0.2.0-full-report.md
+          v0.3.0|v0.3.0-full-report.md
+          v0.4.0|v0.4.0-full-report.md
+          v0.5.0|v0.5.0-full-report.md
+          v0.5.1|v0.5.1-full-report.md
+          v1.0.0|v1.0.0-full-report.md
+          EOF
+
+          if [[ "$all_reports_present" == "true" ]]; then
+            echo "All semantic release archaeology reports are already published."
+            exit 0
+          fi
 
           create_release             v0.1.0             046632da7d05ec5e1bf6c16c86c415d6576f75d6             "v0.1.0 — Phase 0: Repair current invariants"             docs/releases/v0.1.0-phase-0.md
 
@@ -68,6 +115,18 @@ jobs:
 
           create_release             v1.0.0             "$RELEASE_TARGET"             "v1.0.0 — First stable Python Scaffolding baseline"             docs/releases/v1.0.0.md
 
-          gh release upload v1.0.0             docs/releases/v1.0.0-full-report.md#python-scaffolding-v1.0.0-full-report.md             --repo "$GITHUB_REPOSITORY"
+          sync_release             v0.1.0             "v0.1.0 — Phase 0: Repair current invariants"             docs/releases/v0.1.0-phase-0.md             docs/releases/v0.1.0-full-report.md             python-scaffolding-v0.1.0-full-report.md
+
+          sync_release             v0.2.0             "v0.2.0 — Phase 1: Extract environment architecture"             docs/releases/v0.2.0-phase-1.md             docs/releases/v0.2.0-full-report.md             python-scaffolding-v0.2.0-full-report.md
+
+          sync_release             v0.3.0             "v0.3.0 — Phase 2: Bootstrap boundaries"             docs/releases/v0.3.0-phase-2.md             docs/releases/v0.3.0-full-report.md             python-scaffolding-v0.3.0-full-report.md
+
+          sync_release             v0.4.0             "v0.4.0 — Phase 3: Scaffold testing and cross-platform CI"             docs/releases/v0.4.0-phase-3.md             docs/releases/v0.4.0-full-report.md             python-scaffolding-v0.4.0-full-report.md
+
+          sync_release             v0.5.0             "v0.5.0 — Phase 4: Dual Python authority"             docs/releases/v0.5.0-phase-4.md             docs/releases/v0.5.0-full-report.md             python-scaffolding-v0.5.0-full-report.md
+
+          sync_release             v0.5.1             "v0.5.1 — Windows env-rebuild hotfix"             docs/releases/v0.5.1-hotfix.md             docs/releases/v0.5.1-full-report.md             python-scaffolding-v0.5.1-full-report.md
+
+          sync_release             v1.0.0             "v1.0.0 — First stable Python Scaffolding baseline"             docs/releases/v1.0.0.md             docs/releases/v1.0.0-full-report.md             python-scaffolding-v1.0.0-full-report.md
 
           gh release edit v1.0.0             --repo "$GITHUB_REPOSITORY"             --latest
