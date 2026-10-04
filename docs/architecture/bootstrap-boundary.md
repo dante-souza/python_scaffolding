@@ -80,6 +80,18 @@ The dispatcher behavior is covered separately from environment selection:
 
 Together with the environment-layer tests that return no target when already running under the authority Python, these checks prove the handoff is single-pass rather than recursive.
 
+## Windows destructive rebuild boundary
+
+Windows cannot remove `.venv\\Scripts\\python.exe` while that executable is
+still running. For `env-rebuild`, the PowerShell adapter therefore remains the
+foreground parent: a short Python resolver selects an authority interpreter
+outside the project `.venv`, exits to release the executable lock, and then
+PowerShell launches the full rebuild with that safe interpreter and waits for
+completion.
+
+The adapter coordinates process lifetime only. Environment policy remains owned
+by the Python layer.
+
 ## Boundary rule
 
 Finding a Python executable does not make that interpreter the project authority.

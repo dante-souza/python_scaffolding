@@ -5,7 +5,14 @@
 # as well as Windows shells supported by GNU Make.
 
 PYTHON ?= python
+POWERSHELL ?= powershell
 PROJECT_CLI := $(PYTHON) scripts/repo.py
+
+ifeq ($(OS),Windows_NT)
+ENV_REBUILD_CLI := $(POWERSHELL) -NoProfile -File project.ps1 env-rebuild
+else
+ENV_REBUILD_CLI := $(PROJECT_CLI) env-rebuild
+endif
 
 .PHONY: help doctor doctor-no-color doctor-force-color bootstrap setup sync lock \
         env-rebuild test lint format check clean run agents-list skills-list agents-check
@@ -37,7 +44,7 @@ setup:
 	@$(PROJECT_CLI) setup
 
 env-rebuild:
-	@$(PROJECT_CLI) env-rebuild
+	@$(ENV_REBUILD_CLI)
 
 test:
 	@$(PROJECT_CLI) test

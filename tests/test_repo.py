@@ -202,6 +202,23 @@ def test_cmd_lock_routes_native_uv_to_authority_python(
     ]
 
 
+def test_windows_direct_env_rebuild_from_project_venv_requires_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    venv = tmp_path / ".venv"
+    venv_python = venv / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.touch()
+
+    monkeypatch.setattr(repo_module, "IS_WINDOWS", True)
+    monkeypatch.setattr(repo_module, "VENV", venv)
+    monkeypatch.setattr(repo_module.sys, "executable", str(venv_python))
+
+    with pytest.raises(SystemExit, match="project.ps1 env-rebuild"):
+        repo_module.cmd_env_rebuild()
+
+
 def test_main_returns_handoff_exit_without_local_command_execution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

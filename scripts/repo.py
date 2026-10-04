@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from environment import (
+    IS_WINDOWS,
     ROOT,
     EnvironmentContractError,
     authority_handoff_target,
+    inside,
     load_policy,
     provenance_matches,
     python_executable_version,
@@ -195,6 +197,13 @@ def cmd_setup() -> None:
 
 
 def cmd_env_rebuild() -> None:
+    if IS_WINDOWS and inside(sys.executable, VENV):
+        raise SystemExit(
+            "ERROR: Windows env-rebuild cannot delete the project .venv while "
+            "running from its Python. Use: make env-rebuild "
+            "(or .\\project.ps1 env-rebuild)"
+        )
+
     if POLICY.authority == "conda":
         require_authority()
     else:

@@ -49,9 +49,19 @@ def test_makefile_public_targets_match_dispatcher_contract() -> None:
 def test_makefile_routes_public_targets_through_project_cli() -> None:
     content = (ROOT / "Makefile").read_text(encoding="utf-8")
 
-    for target in {"help", *repo_module.TARGETS}:
+    for target in {"help", *repo_module.TARGETS} - {"env-rebuild"}:
         pattern = rf"(?m)^{re.escape(target)}:\s*$\n\t@\$\(PROJECT_CLI\) {re.escape(target)}\s*$"
         assert re.search(pattern, content), f"{target!r} bypasses PROJECT_CLI"
+
+    assert "ENV_REBUILD_CLI := $(PROJECT_CLI) env-rebuild" in content
+    assert (
+        "ENV_REBUILD_CLI := $(POWERSHELL) -NoProfile -File project.ps1 env-rebuild"
+        in content
+    )
+    assert re.search(
+        r"(?m)^env-rebuild:\s*$\n\t@\$\(ENV_REBUILD_CLI\)\s*$",
+        content,
+    )
 
 
 def test_repo_help_runs_without_active_authority() -> None:

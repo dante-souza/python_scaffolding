@@ -150,5 +150,11 @@ jobs:
       - name: Bootstrap scaffold
         run: make setup
 
+      - name: Rebuild from active project venv
+        run: |
+          $env:VIRTUAL_ENV = "$PWD\.venv"
+          $env:PATH = "$env:VIRTUAL_ENV\Scripts;$env:PATH"
+          make env-rebuild
+
       - name: Quality gates
         run: make check
