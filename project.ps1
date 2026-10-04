@@ -84,8 +84,37 @@ if ($CommandArgs.Count -eq 0) {
 Push-Location $RootDir
 
 try {
-    & $PythonBin "scripts/repo.py" @CommandArgs
-    $ExitCode = $LASTEXITCODE
+    if ($CommandArgs.Count -eq 1 -and $CommandArgs[0] -eq "env-rebuild") {
+        # Windows cannot delete .venv while its python.exe is still executing.
+        # Resolve a safe authority Python first, let that probe exit, then launch
+        # the full rebuild from the external interpreter while PowerShell remains
+        # the foreground parent and waits for completion.
+        $RebuildPythonOutput = & $PythonBin "scripts/env_rebuild_target.py"
+        $TargetExitCode = $LASTEXITCODE
+
+        if ($TargetExitCode -ne 0) {
+            $ExitCode = $TargetExitCode
+        }
+        else {
+            $RebuildPython = [string]($RebuildPythonOutput | Select-Object -Last 1)
+            $RebuildPython = $RebuildPython.Trim()
+
+            if ([string]::IsNullOrWhiteSpace($RebuildPython)) {
+                [Console]::Error.WriteLine(
+                    "ERROR: env-rebuild target resolver returned no Python executable."
+                )
+                $ExitCode = 2
+            }
+            else {
+                & $RebuildPython "scripts/repo.py" @CommandArgs
+                $ExitCode = $LASTEXITCODE
+            }
+        }
+    }
+    else {
+        & $PythonBin "scripts/repo.py" @CommandArgs
+        $ExitCode = $LASTEXITCODE
+    }
 }
 finally {
     Pop-Location
