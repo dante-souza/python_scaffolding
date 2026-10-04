@@ -2,9 +2,11 @@
 
 ## Purpose
 
-Phase 3 tests the scaffold itself rather than only the placeholder application package.
+The scaffold tests its own environment policy, provenance, command dispatcher,
+Makefile surface, shell adapters, and CI topology.
 
-The test suite must prove that environment policy, provenance, the command dispatcher, the Makefile surface, the shell adapters, and CI continue to behave as one coherent contract across supported hosts.
+Phase 4 extends that contract from one Python authority to two while preserving
+one public lifecycle.
 
 ## Test layers
 
@@ -14,112 +16,93 @@ environment.toml
       v
 scripts/environment.py
       |
-      +--> unit tests: policy, authority state, provenance
+      +--> policy / authority / provenance unit tests
       |
       v
-scripts/repo.py
+scripts/bootstrap.py + scripts/repo.py + scripts/doctor.py
       |
-      +--> unit tests: handoff and dispatch
+      +--> bootstrap / dispatch / lifecycle / diagnostics tests
       |
       v
 Makefile / project.sh / project.ps1
       |
-      +--> integration tests: public command surface and bootstrap failures
+      +--> command-surface integration tests
       |
       v
 .github/workflows/ci.yml
       |
-      +--> Linux:  Conda + GNU Make + Bash-specific tests
-      |
-      +--> Windows: Conda + GNU Make + PowerShell-specific tests
+      +--> Linux   / Conda / Make
+      +--> Linux   / uv    / Make
+      +--> Windows / Conda / Make
+      +--> Windows / uv    / Make
 ```
 
-### Environment-policy unit tests
+## Authority tests
 
-`tests/test_environment.py` and `tests/test_environment_state.py` cover:
+The suite proves both authority identities.
 
-- repository policy loading;
-- authority-Python selection;
-- authority handoff selection;
-- missing or invalid provenance;
-- provenance equality and mismatch behavior;
-- missing Conda activation;
-- Python execution outside the active Conda prefix;
-- the current `python -m uv` invocation contract.
+Conda tests cover active-prefix requirements, interpreter membership, handoff,
+`python -m uv`, legacy provenance compatibility, and Conda-specific mismatch
+behavior.
 
-These tests must stay independent from Phase 4. They verify the current `authority = "conda"` contract and must not silently introduce native-uv authority.
+Native-uv tests cover executable discovery, managed-Python installation and
+resolution, direct uv invocation, uv-specific provenance, and the absence of a
+fake active-environment/re-exec model. Managed-Python discovery explicitly uses
+`--system` so the project `.venv` cannot replace the source authority after
+bootstrap.
 
-### Dispatcher tests
+The repository default is `authority = "uv"`. CI temporarily selects
+`authority = "conda"` only inside the two Conda matrix workspaces so both
+policies run from the same commit.
 
-`tests/test_repo.py` covers execution behavior after Python has started:
+## Command surface
 
-- no unnecessary handoff;
-- single-pass authority handoff;
-- command and exit-code preservation;
-- local dispatch when no handoff is required;
-- `help` remaining available without authority activation.
+`tests/test_command_contract.py` treats the repository entry points as a public
+interface. It verifies that Makefile targets and the Python dispatcher expose
+the same vocabulary and that Bash/PowerShell adapters remain thin.
 
-### Command-surface integration tests
+No authority-specific public target is added. CI must not bypass the contract
+with direct `uv sync`, `python -m uv`, pytest, or Ruff lifecycle commands.
 
-`tests/test_command_contract.py` treats the repository entry points as a public interface.
+## CI proof
 
-It verifies that:
-
-- Makefile public targets match the dispatcher vocabulary;
-- Make targets route through the shared Python dispatcher;
-- direct dispatcher help works without an active authority environment;
-- unknown commands fail as usage errors rather than environment errors;
-- Bash and PowerShell adapters delegate to the shared dispatcher on their native CI host;
-- a missing Python bootstrap command produces exit code `127` plus minimal pre-Python diagnostics.
-
-### CI contract tests
-
-`tests/test_ci_contract.py` treats the CI workflow as another scaffold artifact.
-
-It verifies that:
-
-- both `ubuntu-latest` and `windows-latest` remain covered;
-- each runner activates the current Conda authority with Python 3.12;
-- third-party actions are pinned to reviewed commit SHAs;
-- both runners execute `make setup` followed by `make check`;
-- Windows explicitly provisions GNU Make;
-- feature branches, integration branches, pull requests, and manual dispatch remain represented in the workflow triggers.
-
-## CI boundary
-
-`.github/workflows/ci.yml` is intentionally thin. Runner setup provides Conda and, on Windows, GNU Make. Repository behavior still flows through the same public lifecycle used locally:
+Each OS job has a two-authority matrix. All four lanes execute the same sequence:
 
 ```text
-Conda authority
-      |
-      v
-make setup
-      |
-      v
-make check
-      |
-      +--> Ruff
-      +--> pytest
-      +--> agent/skill validation
+environment baseline
+        |
+        v
+    make setup
+        |
+        v
+    make check
 ```
 
-The Linux job uses `bash -el {0}` so Conda activation survives into each step and the Bash-specific adapter tests execute. The Windows job uses PowerShell, provisions GNU Make, and executes the PowerShell-specific adapter tests.
+Only runner preparation differs:
 
-CI must not reimplement environment policy, provenance validation, dispatcher behavior, or shell-adapter behavior. Those remain owned by `environment.toml`, `scripts/environment.py`, `scripts/repo.py`, and the repository test suite.
+- Conda lanes activate a Python 3.12 Conda environment and select
+  `authority = "conda"` in that ephemeral checkout.
+- uv lanes install the pinned setup-uv action and keep the repository default
+  `authority = "uv"`.
+- Windows lanes additionally install GNU Make.
+
+Everything after runner preparation is owned by the repository.
 
 ## Dependency pinning
 
-External actions are pinned to immutable commit SHAs in the workflow, with their reviewed release tag recorded as a comment. Updating an action is therefore an explicit repository change rather than an implicit moving-tag update.
-
-The initial Phase 3B pins are:
+External actions are pinned to immutable commit SHAs:
 
 - `actions/checkout` release `v7.0.1`;
-- `conda-incubator/setup-miniconda` release `v4.1.0`.
+- `conda-incubator/setup-miniconda` release `v4.1.0`;
+- `astral-sh/setup-uv` release `v10.2.0`.
 
 ## Change rule
 
-When the public command vocabulary changes, update the dispatcher and Makefile together and let the command-contract tests detect drift.
+When the public command vocabulary changes, update the dispatcher and Makefile
+together.
 
-When environment behavior changes, add or update the smallest policy/provenance test that demonstrates the new invariant before changing consumers.
+When environment behavior changes, update the smallest authority/provenance
+tests that demonstrate the invariant.
 
-When CI platform coverage, action versions, or lifecycle commands change, update `tests/test_ci_contract.py` in the same commit.
+When CI topology or lifecycle commands change, update
+`tests/test_ci_contract.py` in the same commit.

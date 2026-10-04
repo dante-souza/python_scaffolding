@@ -47,7 +47,8 @@ Native uv bootstrap is deliberately different:
 1. require a native `uv` executable on `PATH`;
 2. run `uv python install <request>`;
 3. resolve that installed interpreter through the non-mutating managed-Python
-   discovery boundary from Phase 4B;
+   discovery boundary from Phase 4B, including `--system` so the project
+   `.venv` cannot shadow the authority interpreter;
 4. query the resolved interpreter for its concrete version;
 5. create `.venv` with native `uv` using that exact interpreter;
 6. record `source_authority = "uv"`, interpreter path/version, and the
@@ -68,10 +69,6 @@ The uv executable path is recorded for diagnostics but is not part of
 provenance equality. Moving or upgrading the uv executable does not by itself
 change the Python runtime from which `.venv` was created.
 
-## Phase 4C boundary
+## Historical Phase 4C boundary
 
-This block owns bootstrap, `.venv` creation, and provenance only.
-
-It does not yet make every public lifecycle command dual-authority aware.
-Dispatcher handoff, `sync`, `lock`, `doctor`, and the complete public
-Makefile lifecycle are handled in the next Phase 4 block.
+Phase 4C owns bootstrap, `.venv` creation, and provenance. Phase 4D later made dispatcher, `sync`, `lock`, and `doctor` authority-aware, while Phase 4E proved the complete public Makefile lifecycle on Linux and Windows under both authorities.

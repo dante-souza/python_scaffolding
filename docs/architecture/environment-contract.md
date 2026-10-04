@@ -13,8 +13,7 @@ Two authority modes are supported:
 - `authority = "uv"`: native uv resolves and manages the configured Python
   request directly.
 
-The repository remains Conda-default while native-uv support is proven through
-Phase 4.
+The reusable scaffold defaults to native uv. Conda remains a first-class alternative selected through the same `environment.toml` contract.
 
 ## Authority chain
 

@@ -1,6 +1,8 @@
 # ADR-001: Conda is the Python authority
 
-**Status:** Accepted
+**Status:** Superseded by ADR-002
+
+> Historical decision. The Conda-specific mechanics remain supported under `authority = "conda"`, but Conda is no longer the sole Python authority.
 
 ## Context
 

@@ -24,8 +24,7 @@ Conda-selected Python               uv-managed Python request
              uv-managed dependencies
 ```
 
-The repository default remains `authority = "conda"` while the native-uv path
-is introduced and proven incrementally.
+Phase 4 introduced native-uv authority incrementally while preserving the Conda path. After the dual-authority lifecycle passed on Linux and Windows, the reusable scaffold default became `authority = "uv"`.
 
 ## Phase 4B boundary
 
@@ -34,28 +33,15 @@ Phase 4B owns discovery only:
 - locate the native `uv` executable from `PATH`;
 - fail closed when native-uv authority is configured but `uv` is unavailable;
 - resolve the configured `[python].request` through
-  `uv python find --managed-python --no-python-downloads --no-project`;
+  `uv python find --managed-python --system --no-python-downloads --no-project`;
 - require that the resolved interpreter actually exists;
 - expose one shared `resolve_authority_python()` boundary for later consumers.
 
-The `--no-python-downloads` flag is deliberate here. Discovery must not mutate
-the host. Installing the requested managed Python belongs to bootstrap, which is
-introduced in Phase 4C.
+The discovery flags are deliberate. `--no-python-downloads` keeps discovery non-mutating, while `--system` prevents a project `.venv` from becoming the resolved authority after bootstrap. Installing the requested managed Python belongs to bootstrap.
 
-## Non-goals of this block
+## Historical Phase 4B boundary
 
-Phase 4B does **not** yet:
-
-- switch the repository default to `authority = "uv"`;
-- install a managed Python;
-- create or rebuild `.venv` from the native-uv authority;
-- change provenance metadata;
-- change dispatcher handoff behavior;
-- change `doctor` output;
-- change CI into a dual-authority matrix.
-
-Those changes depend on the resolution boundary proven here and are handled by
-later Phase 4 blocks.
+Phase 4B intentionally stopped at discovery. Later Phase 4 blocks added managed-Python installation, `.venv` creation, provenance, lifecycle dispatch, diagnostics, the uv-default policy, and the four-lane CI proof. Keeping this boundary documented explains why discovery remains a small reusable primitive instead of absorbing bootstrap behavior.
 
 ## Invariant
 

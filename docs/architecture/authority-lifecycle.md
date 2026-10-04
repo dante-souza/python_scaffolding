@@ -87,11 +87,8 @@ managed Python without treating Conda activation as a requirement.
 A missing uv-managed Python is a bootstrap condition, not evidence that the
 host's arbitrary bootstrap Python is invalid.
 
-## Boundary after 4D
+## State after Phase 4
 
-At this point policy, discovery, bootstrap, provenance, dispatcher, dependency
-sync/lock, and diagnostics all understand both authority modes.
+Policy, discovery, bootstrap, provenance, dispatcher, dependency sync/lock, and diagnostics all understand both authority modes.
 
-The repository still defaults to `authority = "conda"`. The remaining Phase 4
-work is to prove the same Makefile contract end-to-end under both modes,
-including CI coverage, before deciding whether the default should change.
+Phase 4E proved the same Makefile lifecycle end-to-end on Linux and Windows under both Conda and native uv. The reusable scaffold now defaults to `authority = "uv"`; Conda remains a first-class alternative selected through `environment.toml`.

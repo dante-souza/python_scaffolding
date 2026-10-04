@@ -20,9 +20,12 @@ Makefile / project.sh / project.ps1
                 |
                 | authority handoff
                 v
-        configured authority Python
-                |
-                v
+        authority-specific resolution
+         /                  \
+        /                    \
+ active Conda Python      uv-managed Python
+        \                    /
+         \                  /
  environment.py / doctor.py / bootstrap.py
 ```
 
@@ -58,17 +61,13 @@ Bash also reports `MSYSTEM` and `WSL_DISTRO_NAME`. When a Python startup failure
 
 ## Authority handoff contract
 
-Phase 2C makes the successful handoff explicit and testable.
+Phase 2C introduced the successful handoff boundary; Phase 4 makes its authority-specific nature explicit.
 
-`scripts/environment.py` owns handoff selection through `authority_handoff_target()`. The selector returns an authority interpreter only when:
+For `authority = "conda"`, `scripts/environment.py` owns handoff selection through `authority_handoff_target()`. The selector returns the active Conda interpreter only when it exists and differs from the bootstrap interpreter. `scripts/repo.py` then re-runs the same command under that interpreter and propagates the child exit code.
 
-- the configured authority can resolve a Python path;
-- that interpreter exists;
-- the current bootstrap interpreter is different from the authority interpreter.
+For `authority = "uv"`, there is no active-environment handoff. Native uv explicitly resolves the configured managed Python and consumers pass that interpreter to authority-sensitive operations. The dispatcher therefore does not pretend that uv has Conda-like shell activation.
 
-`scripts/repo.py` owns execution only: when a target is returned, it re-runs the same command under that interpreter and propagates the child exit code. When no target is returned, dispatch continues in the current interpreter and the existing Python policy checks remain authoritative.
-
-This split prevents the dispatcher from re-encoding authority rules and prevents recursive handoff once execution is already under the authority Python.
+This split prevents the dispatcher from re-encoding authority rules and prevents recursive handoff once execution is already under the Conda authority Python.
 
 The dispatcher behavior is covered separately from environment selection:
 

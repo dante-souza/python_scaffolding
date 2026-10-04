@@ -51,4 +51,6 @@ make setup
 make check
 ```
 
-Phase 4E passes only when Linux/Windows under both Conda and uv are green.
+Phase 4E is accepted only when Linux/Windows under both Conda and uv are green. The final matrix satisfied that condition.
+
+The first native-uv matrix run also exposed an important provenance regression: once `.venv` existed, authority discovery could resolve the project environment instead of the uv-managed source Python. The corrective invariant is now explicit: managed-Python authority discovery uses `--system`, and tests guard that behavior on both platforms.
