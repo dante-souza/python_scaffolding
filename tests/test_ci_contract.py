@@ -43,7 +43,7 @@ def test_ci_exercises_same_make_lifecycle_for_every_matrix_lane() -> None:
     assert "uv sync" not in content
     assert "python -m uv" not in content
     assert "choco install make --yes --no-progress" in content
-    assert content.count("run: make env-rebuild") == 1
+    assert content.count("make env-rebuild") == 1
     assert "Rebuild from active project venv" in content
     assert '$env:VIRTUAL_ENV = "$PWD\\.venv"' in content
 
