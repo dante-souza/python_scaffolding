@@ -105,6 +105,144 @@ def test_uv_authority_does_not_reexec_dispatcher(
     assert repo_module.handoff_to_authority() is None
 
 
+def test_windows_env_rebuild_execs_conda_python_outside_project_venv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    venv = tmp_path / ".venv"
+    venv_python = venv / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.touch()
+    authority_python = tmp_path / "conda" / "python.exe"
+    authority_python.parent.mkdir()
+    authority_python.touch()
+
+    monkeypatch.setattr(repo_module, "POLICY", conda_policy())
+    monkeypatch.setattr(repo_module, "IS_WINDOWS", True)
+    monkeypatch.setattr(repo_module, "VENV", venv)
+    monkeypatch.setattr(repo_module.sys, "executable", str(venv_python))
+    monkeypatch.setattr(repo_module.sys, "argv", ["repo.py", "env-rebuild"])
+    monkeypatch.setattr(
+        repo_module,
+        "authority_handoff_target",
+        lambda policy: authority_python,
+    )
+
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_execv(executable: str, argv: list[str]) -> None:
+        calls.append((executable, argv))
+        raise RuntimeError("exec-called")
+
+    monkeypatch.setattr(repo_module.os, "execv", fake_execv)
+
+    with pytest.raises(RuntimeError, match="exec-called"):
+        repo_module.handoff_to_authority()
+
+    assert calls == [
+        (
+            str(authority_python),
+            [
+                str(authority_python),
+                str(repo_module.ROOT / "scripts" / "repo.py"),
+                "env-rebuild",
+            ],
+        )
+    ]
+
+
+def test_windows_env_rebuild_prepares_and_execs_uv_managed_python(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    venv = tmp_path / ".venv"
+    venv_python = venv / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.touch()
+    uv = tmp_path / "uv.exe"
+    uv.touch()
+    managed_python = tmp_path / "managed" / "python.exe"
+    managed_python.parent.mkdir()
+    managed_python.touch()
+
+    monkeypatch.setattr(repo_module, "POLICY", uv_policy())
+    monkeypatch.setattr(repo_module, "IS_WINDOWS", True)
+    monkeypatch.setattr(repo_module, "VENV", venv)
+    monkeypatch.setattr(repo_module.sys, "executable", str(venv_python))
+    monkeypatch.setattr(repo_module.sys, "argv", ["repo.py", "env-rebuild"])
+    monkeypatch.setattr(repo_module, "require_native_uv", lambda policy: uv)
+    monkeypatch.setattr(
+        repo_module,
+        "resolve_uv_managed_python",
+        lambda policy, uv_executable=None: managed_python,
+    )
+
+    run_calls: list[tuple[list[str], Path, bool]] = []
+
+    def fake_run(args, *, cwd, check):
+        run_calls.append((args, cwd, check))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(repo_module.subprocess, "run", fake_run)
+
+    exec_calls: list[tuple[str, list[str]]] = []
+
+    def fake_execv(executable: str, argv: list[str]) -> None:
+        exec_calls.append((executable, argv))
+        raise RuntimeError("exec-called")
+
+    monkeypatch.setattr(repo_module.os, "execv", fake_execv)
+
+    with pytest.raises(RuntimeError, match="exec-called"):
+        repo_module.handoff_to_authority()
+
+    assert run_calls == [
+        (
+            [str(uv), "python", "install", "3.12"],
+            repo_module.ROOT,
+            False,
+        )
+    ]
+    assert exec_calls == [
+        (
+            str(managed_python),
+            [
+                str(managed_python),
+                str(repo_module.ROOT / "scripts" / "repo.py"),
+                "env-rebuild",
+            ],
+        )
+    ]
+
+
+def test_windows_env_rebuild_escape_is_not_used_for_other_uv_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    venv = tmp_path / ".venv"
+    venv_python = venv / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.touch()
+
+    monkeypatch.setattr(repo_module, "POLICY", uv_policy())
+    monkeypatch.setattr(repo_module, "IS_WINDOWS", True)
+    monkeypatch.setattr(repo_module, "VENV", venv)
+    monkeypatch.setattr(repo_module.sys, "executable", str(venv_python))
+    monkeypatch.setattr(repo_module.sys, "argv", ["repo.py", "doctor"])
+    monkeypatch.setattr(
+        repo_module.os,
+        "execv",
+        lambda *args: pytest.fail("doctor must not replace the dispatcher process"),
+    )
+    monkeypatch.setattr(
+        repo_module.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("doctor must not prepare uv rebuild authority"),
+    )
+
+    assert repo_module.handoff_to_authority() is None
+
+
 def test_require_authority_resolves_uv_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

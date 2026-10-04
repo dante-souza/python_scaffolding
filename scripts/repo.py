@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -7,9 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from environment import (
+    IS_WINDOWS,
     ROOT,
     EnvironmentContractError,
     authority_handoff_target,
+    inside,
     load_policy,
     provenance_matches,
     python_executable_version,
@@ -18,6 +21,7 @@ from environment import (
     require_native_uv,
     resolve_uv_managed_python,
     uv_module_args,
+    uv_python_install_args,
 )
 
 POLICY = load_policy()
@@ -65,8 +69,68 @@ def run_script(name: str, *args: str) -> None:
     run([str(ROOT / "scripts" / name), *args], executable=Path(sys.executable))
 
 
+def current_command() -> str | None:
+    if len(sys.argv) != 2:
+        return None
+    return sys.argv[1].replace("-", "_")
+
+
+def windows_env_rebuild_escape_target() -> Path | None:
+    if (
+        not IS_WINDOWS
+        or current_command() != "env_rebuild"
+        or not inside(sys.executable, VENV)
+    ):
+        return None
+
+    if POLICY.authority == "conda":
+        return authority_handoff_target(POLICY)
+
+    try:
+        uv = require_native_uv(POLICY)
+    except EnvironmentContractError as exc:
+        raise SystemExit(f"ERROR: {exc}.") from None
+
+    # env-rebuild may be the first native-uv command after a Conda-backed
+    # project .venv. Ensure the authority Python exists before replacing the
+    # process that currently locks .venv\\Scripts\\python.exe on Windows.
+    completed = subprocess.run(
+        [str(uv), *uv_python_install_args(POLICY)],
+        cwd=ROOT,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
+
+    try:
+        target = resolve_uv_managed_python(POLICY, uv_executable=uv)
+    except EnvironmentContractError as exc:
+        raise SystemExit(f"ERROR: {exc}.") from None
+
+    if inside(target, VENV):
+        raise SystemExit(
+            "ERROR: env-rebuild escape Python resolved inside the project .venv."
+        )
+    return target
+
+
+def exec_dispatcher(executable: Path) -> None:
+    os.execv(
+        str(executable),
+        [str(executable), str(ROOT / "scripts" / "repo.py"), *sys.argv[1:]],
+    )
+    raise RuntimeError("os.execv returned unexpectedly")
+
+
 def handoff_to_authority() -> int | None:
-    # Conda authority is active shell state, so policy-sensitive commands must
+    # Windows cannot delete .venv while this dispatcher is running from
+    # .venv\\Scripts\\python.exe. env-rebuild therefore replaces this process
+    # with an authority Python outside .venv before deletion starts.
+    rebuild_target = windows_env_rebuild_escape_target()
+    if rebuild_target is not None:
+        exec_dispatcher(rebuild_target)
+
+    # Conda authority is active shell state, so other policy-sensitive commands
     # execute under that environment's interpreter. Native uv authority is
     # explicit instead: consumers resolve and pass its managed Python directly.
     if POLICY.authority == "uv":
